@@ -30,9 +30,10 @@ state from the **stock Amazon Kindle reader** and sends it to **Hardcover.app**.
    require one specific property.
 5. **Auth = Hardcover OAuth Device Authorization Grant.** Kindle shows a code/QR,
    user approves on phone at hardcover.app/link. No token typing on the Kindle.
-6. **Proposed runtime: one static ARM binary (Go or Rust) with its own TLS.**
-   Old firmware may have old TLS and no Python. Do not rely on system curl/Python.
-   (Proposed, not final. Confirm before building.)
+6. **Runtime: one static ARM binary in Go** (`CGO_ENABLED=0`), with its own TLS
+   and bundled CA certs. Do not rely on system curl/Python.
+   Risk: new Go needs a newer Linux kernel than old Kindles have. Pin the Go
+   version after a test binary runs on a real device (see `docs/open-questions.md`).
 
 ## Proposed layout
 ```
