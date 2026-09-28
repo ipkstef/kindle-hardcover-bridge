@@ -7,16 +7,17 @@ Goal: **replace Goodreads on the Kindle**. Everything else stays native.
 - **No manual "add book" step** in the end product.
 - **No KUAL in the end product** if possible. OK if unavoidable.
 
-## 1. Sync triggers (instead of a 30 s poll)
-Candidates, to test with probe item 5 ("Watch events"):
-- **inotify on `/var/local/cc.db`.** Kernel feature (since 2.6.13, so on every
-  Kindle). Fires when the reader writes `cc.db` (go Home, open, sleep). No
-  polling. Works in Go without cgo. Local test: OK. Device: **UNVERIFIED**.
-- **LIPC events** (`lipc-wait-event -m <publisher> '*'`):
-  `powerd` (screensaver, suspend, wake), `wifid` (Wi-Fi up → send queued
-  update), `appmgrd` (reader ↔ Home). Names and events **UNVERIFIED**.
-- Plan: inotify = main trigger; Wi-Fi-up event = retry trigger; a slow
-  safety poll (e.g. 10 min, only while awake) as a fallback.
+## 1. Sync triggers (instead of a 30 s poll) — confirmed on device
+See findings "Events test". Design:
+- **Main trigger:** `appPaused "com.lab126.booklet.reader"` (user left the
+  book) **or** inotify `cc.db-journal DELETE` (DB commit). Then wait ~5 s,
+  read `cc.db`, send if the percent went up.
+- **Retry trigger:** `connectionAvailable "wifi" "internet"` (or
+  `cmConnected`) → send queued updates.
+- **Safety net:** slow poll (e.g. 15 min) while awake.
+- No work while in screensaver/suspend (nothing runs then anyway).
+- `lipc-wait-event` is a Kindle tool, not curl/Python; exists on FW 5.x.
+  Present on old firmware: **UNVERIFIED**. inotify needs only the kernel.
 
 ## 2. Auto-add books (no manual step)
 Order, stop at the first confident hit:
@@ -43,8 +44,9 @@ Proposed rule (**to confirm with a test**):
 
 ## 5. Install without KUAL
 - The Kindle library already lists `KUAL.sh` (type PDOC, mime
-  `text/x-shellscript`), so this jailbreak runs **`.sh` scriptlets from the
-  library**. Idea: one file `documents/Hardcover.sh`:
+  `text/x-shellscript`), and tapping it starts
+  `com.notmarek.shell_integration.launcher` (seen in the events test). So this
+  jailbreak runs **`.sh` scriptlets from the library**. Idea: one file `documents/Hardcover.sh`:
   tap it → install/start daemon, show sign-in code if needed.
 - Autostart after reboot: an upstart job in `/etc/upstart/` (needs rootfs
   write; likely lost on firmware update → tap `Hardcover.sh` again).

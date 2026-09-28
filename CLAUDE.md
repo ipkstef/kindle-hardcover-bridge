@@ -17,7 +17,8 @@ state from the **stock Amazon Kindle reader** and sends it to **Hardcover.app**.
   No SSH after setup.
 
 ## Design decisions (already made)
-1. **Companion daemon, not a reader.** Poll about every 30 s. Send only on change.
+1. **Companion daemon, not a reader.** Event-driven (LIPC + inotify, see
+   `docs/roadmap.md` §1), slow poll only as a safety net. Send only on change.
    Near-real-time is not required; a sync after the user closes the book is fine.
 2. **Data source priority** (see `docs/kindle-data-sources.md`):
    1. Kindle local reading DB (e.g. `cc.db`) — most likely stable across firmware.
@@ -61,8 +62,9 @@ title + author (never guesses). **Works on the user's Kindle** (sign-in +
 progress update confirmed). Sync is **forward only** (user decision).
 
 User goals and plan: `docs/roadmap.md` (event triggers, auto-add books,
-restart/finish, install without KUAL). Probe items 5 (events) and 6 (book IDs)
-built; waiting for the user's results.
+restart/finish, install without KUAL). Events test done: appmgrd
+`appPaused` reader + inotify on cc.db + Wi-Fi events all work (roadmap §1).
+Book ID scan had a parser bug; v0.2 waiting for a re-run.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

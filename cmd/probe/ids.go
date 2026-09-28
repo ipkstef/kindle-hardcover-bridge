@@ -44,9 +44,9 @@ func ids(args []string) int {
 	}
 	defer rows.Close()
 
-	p("hcprobe ids v0.1")
-	p("cols: key | cdeType | ext | ISBN (EXTH 104) | ASIN (EXTH 113/504) | readState | percent")
-	var total, isbn, asin, none, kfx, bad int
+	p("hcprobe ids v0.2")
+	p("cols: key | cdeType | ext | EXTH records | ISBN (EXTH 104) | ASIN (EXTH 113/504) | EXTH 113 is kindle key | readState | percent")
+	var total, isbn, asin, none, kfx, bad, noExth int
 	for rows.Next() {
 		var key, typ, loc sql.NullString
 		var rs sql.NullInt64
@@ -54,6 +54,9 @@ func ids(args []string) int {
 		if err := rows.Scan(&key, &typ, &loc, &rs, &pct); err != nil {
 			p("row: %v", err)
 			continue
+		}
+		if loc.String == "" {
+			continue // entry without a file (e.g. KFX side entries)
 		}
 		total++
 		k := key.String
@@ -80,6 +83,8 @@ func ids(args []string) int {
 			continue
 		}
 		i, a := mobi.CleanISBN(m.ISBN), m.ASIN
+		// Calibre writes its book UUID into EXTH 113; Kindle uses it as p_cdeKey.
+		sameKey := m.ASIN != "" && strings.EqualFold(m.ASIN, key.String)
 		if !mobi.IsASIN(a) {
 			a = ""
 		}
@@ -93,10 +98,13 @@ func ids(args []string) int {
 		if i == "" && a == "" {
 			none++
 		}
-		p("%s | %s | %s | %s | %s | %s | %s", k, typ.String, ext, i, a, rsS, pctS)
+		if m.Records == 0 {
+			noExth++
+		}
+		p("%s | %s | %s | %d | %s | %s | %v | %s | %s", k, typ.String, ext, m.Records, i, a, sameKey, rsS, pctS)
 	}
 	p("")
-	p("summary: %d books, %d with ISBN, %d with ASIN, %d with neither, %d kfx (not parsed), %d errors",
-		total, isbn, asin, none, kfx, bad)
+	p("summary: %d books, %d with ISBN, %d with ASIN, %d with neither, %d without EXTH, %d kfx (not parsed), %d errors",
+		total, isbn, asin, none, noExth, kfx, bad)
 	return 0
 }

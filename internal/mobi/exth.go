@@ -12,14 +12,13 @@ import (
 
 // EXTH record types we use. See https://wiki.mobileread.com/wiki/MOBI#EXTH_Header
 const (
-	ExthAuthor    = 100
-	ExthISBN      = 104
-	ExthSource    = 112
-	ExthASIN      = 113
-	ExthCDEType   = 501
-	ExthTitle     = 503
-	ExthASIN2     = 504 // "original" ASIN in some KF8 files
-	exthFlagIndex = 0x80
+	ExthAuthor  = 100
+	ExthISBN    = 104
+	ExthSource  = 112
+	ExthASIN    = 113
+	ExthCDEType = 501
+	ExthTitle   = 503
+	ExthASIN2   = 504 // "original" ASIN in some KF8 files
 )
 
 // Meta is the metadata we care about.
@@ -29,6 +28,7 @@ type Meta struct {
 	Title   string
 	Authors []string
 	Source  string
+	Records int // EXTH records found; 0 means no EXTH header
 }
 
 // ErrNotMobi means the file is not a PalmDB/MOBI file.
@@ -59,8 +59,10 @@ func Read(r io.ReaderAt) (*Meta, error) {
 	}
 	rec0 := int64(binary.BigEndian.Uint32(hdr[78:82]))
 
-	// Record 0: PalmDOC header (16 bytes), then MOBI header.
-	mh := make([]byte, 16+0x84)
+	// Record 0: PalmDOC header (16 bytes), then MOBI header. The EXTH header
+	// follows the MOBI header. We look for its "EXTH" marker and do not trust
+	// the EXTH flag bit (an earlier version read the flag at a wrong offset).
+	mh := make([]byte, 24)
 	if _, err := r.ReadAt(mh, rec0); err != nil {
 		return nil, ErrNotMobi
 	}
@@ -68,11 +70,7 @@ func Read(r io.ReaderAt) (*Meta, error) {
 		return nil, ErrNotMobi
 	}
 	mobiLen := int64(binary.BigEndian.Uint32(mh[20:24]))
-	flags := binary.BigEndian.Uint32(mh[16+exthFlagIndex : 16+exthFlagIndex+4])
 	m := &Meta{}
-	if flags&0x40 == 0 {
-		return m, nil // no EXTH
-	}
 	exth := rec0 + 16 + mobiLen
 	eh := make([]byte, 12)
 	if _, err := r.ReadAt(eh, exth); err != nil || string(eh[0:4]) != "EXTH" {
@@ -95,6 +93,7 @@ func Read(r io.ReaderAt) (*Meta, error) {
 			break
 		}
 		v := strings.TrimSpace(string(data))
+		m.Records++
 		switch typ {
 		case ExthISBN:
 			m.ISBN = v

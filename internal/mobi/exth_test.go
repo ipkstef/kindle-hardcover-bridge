@@ -25,7 +25,7 @@ func build(recs map[uint32]string) []byte {
 	rec0 := make([]byte, 16+mobiLen)
 	copy(rec0[16:], "MOBI")
 	binary.BigEndian.PutUint32(rec0[20:], mobiLen)
-	binary.BigEndian.PutUint32(rec0[16+0x80:], 0x40)
+	binary.BigEndian.PutUint32(rec0[0x80:], 0x40) // EXTH flag, offset from record 0 start
 	f.Write(rec0)
 	f.WriteString("EXTH")
 	binary.Write(&f, binary.BigEndian, uint32(12+exth.Len()))
@@ -42,7 +42,7 @@ func TestRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if CleanISBN(m.ISBN) != "9780593820253" || !IsASIN(m.ASIN) || m.Title != "A Parade of Horribles" || m.Authors[0] != "Matt Dinniman" {
+	if m.Records != 4 || CleanISBN(m.ISBN) != "9780593820253" || !IsASIN(m.ASIN) || m.Title != "A Parade of Horribles" || m.Authors[0] != "Matt Dinniman" {
 		t.Fatalf("got %+v", m)
 	}
 }
@@ -56,5 +56,14 @@ func TestNotMobi(t *testing.T) {
 func TestCalibreUUIDIsNotASIN(t *testing.T) {
 	if IsASIN("f1638687-3e46-45b5-b4b2-8f37103c1743") {
 		t.Fatal("uuid taken as ASIN")
+	}
+}
+
+func TestNoEXTH(t *testing.T) {
+	data := build(nil)
+	data = data[:len(data)-12] // drop the EXTH header
+	m, err := Read(bytes.NewReader(data))
+	if err != nil || m.Records != 0 {
+		t.Fatalf("got %+v %v", m, err)
 	}
 }

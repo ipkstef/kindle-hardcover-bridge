@@ -174,6 +174,9 @@ func watchDB(ctx context.Context, l *logger, dbPath string) {
 			}
 			counts = map[string]int{}
 			mu.Unlock()
+			if len(parts) == 0 {
+				return // burst had only other files in the directory
+			}
 			l.printf("inotify: %s", strings.Join(parts, ", "))
 			report()
 		})

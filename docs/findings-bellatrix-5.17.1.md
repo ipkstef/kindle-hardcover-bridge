@@ -97,3 +97,37 @@ Conclusions:
 - Percent sequence from `cc.db`: 10.72 → 10.60 → 14.58 → 10.60. Hardcover
   followed it, **including backwards** (page 100 → 72). Cause of the drop is
   **UNVERIFIED** (user paged back, or the reader wrote an older position).
+
+## Events test (probe item 5, 2026-09-28, 03:04–03:05 UTC)
+All three event sources work on this device.
+
+**inotify on `/var/local/cc.db*`:** works. Each reader transaction shows as
+`cc.db-journal CREATE … DELETE` (rollback journal). There are also many
+`cc.db CLOSE_WRITE` events without a change (noise). Good trigger:
+`cc.db-journal DELETE` (= commit), then read the DB.
+
+**LIPC `com.lab126.appmgrd`** (`lipc-wait-event -m com.lab126.appmgrd '*'`):
+- Open book: `appActivating 1 "com.lab126.booklet.reader"`, and
+  `historyChange … "file:///mnt/us/documents/<path>.azw3"` (**gives the open
+  book's file path**).
+- Go Home: `appPaused "com.lab126.booklet.reader"` (03:04:44), then the
+  `cc.db` commit 3 s later (03:04:47).
+- Library `.sh` launch: `com.notmarek.shell_integration.launcher` → the
+  jailbreak has notmarek's shell integration (library scriptlets work).
+
+**LIPC `com.lab126.powerd`:** `goingToScreenSaver`, `outOfScreenSaver`,
+`exitingScreenSaver`, `t1TimerReset`, `battLevelChanged`, `charging`,
+`usbConfigured`.
+
+**LIPC `com.lab126.wifid` / `com.lab126.cmd`:** Wi-Fi off →
+`cmDisconnected`, `connectionNotAvailable`. Wi-Fi on → `cmConnected`,
+`cmStateChange "CONNECTED"`, `InternetConnected 1`,
+`connectionAvailable "wifi" "internet"`. After wake, `cmConnected` again.
+
+`com.lab126.readingstreams` and `com.lab126.booklet.reader`: no events seen.
+
+Percent did not change in this test (10.6016 throughout).
+
+## Book ID scan v0.1 (probe item 6) — invalid
+Reported 0 ISBN / 0 ASIN for all 98 MOBI/AZW3 files. Cause: parser bug (EXTH
+flag read at a wrong offset). Fixed in v0.2; to re-run.
