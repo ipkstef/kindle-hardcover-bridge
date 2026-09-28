@@ -94,8 +94,10 @@ found in `/mnt/us/system/fmcache/fmcache.db` (`goodreads_book_ratings`,
 emptied on sleep) → `RateSync` built and **works on device**. Goodreads shelf
 choice: `goodreads_autoshelvings` (`kindle_asin`, `shelf_status`) mapped.
 API calls cut (match cache `bookmap.json`, one shelf lookup, cached `me`,
-rate limiter + 429 retry). **User: lock down core first**; later items (SQLite
-state DB, Rating Error dialog B+C) are in `docs/roadmap.md` "Later".
+rate limiter + 429 retry). Version 3f83ac6 **works on device**: rating,
+shelf mapping, cache, no 429; Start replaces an old daemon. **User: lock down
+core first**; later items (SQLite state DB, Rating Error dialog B+C) are in
+`docs/roadmap.md` "Later". Open: re-read rule, autostart/no-KUAL install.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

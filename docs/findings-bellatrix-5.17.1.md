@@ -280,3 +280,14 @@ tap (read-only research).
   (`goodreads_autoshelvings`).
 - USB mode: `stat My Clippings.txt: stale NFS file handle` → retried later
   (as designed).
+
+## Version 3f83ac6 on device (2026-09-28, 06:28–06:30 UTC)
+- Start replaced the old daemon (pid 23520) → version shown in the log.
+- Rating 5 stars: sent in 1 s (not cached yet: ISBN lookup + shelf entry +
+  rating). Shelf choice `currently-reading` → Hardcover **Currently
+  Reading**, via the match cache (2 calls). **No HTTP 429.**
+- Noisy metrics schemas no longer logged.
+- Finish-once guard: "already finished …, not sent again".
+- Open (user decision): choosing "Currently Reading" in the end-of-book
+  dialog after a finish — treat as a re-read and clear the daemon's
+  "finished" mark? Now progress for that book is held until < 5 %.

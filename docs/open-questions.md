@@ -36,3 +36,9 @@
   **UNVERIFIED** on linux/arm with old kernels.
 - Kindle CPU arch per model (armel vs armhf). Build for the oldest.
 - Token storage: no keychain on Kindle. Store in a file with tight permissions.
+
+## From device tests (2026-09-28)
+- [ ] End-of-book shelf choice "Currently Reading" after a finish: treat as a
+      re-read (clear the daemon's finished mark, start a new read)?
+- [ ] Why Hardcover moved Red Rising back to Currently Reading ~3 min after
+      status Read (05:29 → 05:32). Unknown.
