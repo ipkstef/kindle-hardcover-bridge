@@ -31,7 +31,7 @@ const bookFilter = `p_type = 'Entry:Item' AND p_cdeType IN ('EBOK', 'PDOC')
 const bookColumns = `p_cdeKey, p_titles_0_nominal, j_credits, p_location,
 	p_percentFinished, p_lastAccess, p_cdeType, p_mimeType,
 	p_publisher, CAST(p_publicationDate AS TEXT), p_languages_0,
-	CAST(p_lastAccessedPosition AS TEXT)`
+	CAST(p_lastAccessedPosition AS TEXT), p_readState`
 
 func (d *Database) open() (*sql.DB, error) {
 	return sql.Open("sqlite", "file:"+d.Path+"?mode=ro&_pragma=busy_timeout(5000)")
@@ -55,6 +55,7 @@ func (d *Database) BookByKey(ctx context.Context, key string) (*book.Local, erro
 type Progress struct {
 	Percent    float64 `json:"percent"`
 	LastAccess int64   `json:"last_access"`
+	ReadState  int     `json:"read_state,omitempty"`
 }
 
 // AllProgress returns percent and last access for every opened book, by key.
@@ -64,9 +65,9 @@ func (d *Database) AllProgress(ctx context.Context) (map[string]Progress, error)
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.QueryContext(ctx, `SELECT p_cdeKey, p_percentFinished, p_lastAccess
+	rows, err := db.QueryContext(ctx, `SELECT p_cdeKey, p_percentFinished, p_lastAccess, p_readState
 		FROM Entries WHERE `+bookFilter+` AND p_cdeKey IS NOT NULL
-		AND p_percentFinished IS NOT NULL`)
+		AND (p_percentFinished IS NOT NULL OR p_readState IS NOT NULL)`)
 	if err != nil {
 		return nil, fmt.Errorf("cc.db: %w", err)
 	}
@@ -75,15 +76,15 @@ func (d *Database) AllProgress(ctx context.Context) (map[string]Progress, error)
 	for rows.Next() {
 		var key string
 		var pct sql.NullFloat64
-		var last sql.NullInt64
-		if err := rows.Scan(&key, &pct, &last); err != nil {
+		var last, rs sql.NullInt64
+		if err := rows.Scan(&key, &pct, &last, &rs); err != nil {
 			return nil, fmt.Errorf("cc.db: %w", err)
 		}
 		// Same key twice (seen on device): keep the latest access.
 		if old, ok := out[key]; ok && old.LastAccess >= last.Int64 {
 			continue
 		}
-		out[key] = Progress{Percent: pct.Float64, LastAccess: last.Int64}
+		out[key] = Progress{Percent: pct.Float64, LastAccess: last.Int64, ReadState: int(rs.Int64)}
 	}
 	return out, rows.Err()
 }
@@ -98,11 +99,12 @@ func (d *Database) one(ctx context.Context, q string, args ...any) (*book.Local,
 		key, title, credits, path               sql.NullString
 		cdeType, mime, publisher, pubDate, lang sql.NullString
 		lastPos                                 sql.NullString
+		readState                               sql.NullInt64
 		percent                                 sql.NullFloat64
 		last                                    sql.NullInt64
 	)
 	err = db.QueryRowContext(ctx, q, args...).Scan(&key, &title, &credits, &path, &percent, &last,
-		&cdeType, &mime, &publisher, &pubDate, &lang, &lastPos)
+		&cdeType, &mime, &publisher, &pubDate, &lang, &lastPos, &readState)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoBook
 	}
@@ -123,6 +125,7 @@ func (d *Database) one(ctx context.Context, q string, args ...any) (*book.Local,
 		Language:   lang.String,
 
 		LastPosition: lastPos.String,
+		ReadState:    int(readState.Int64),
 	}, nil
 }
 

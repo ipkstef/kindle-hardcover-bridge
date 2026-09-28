@@ -24,6 +24,9 @@ type Local struct {
 	// LastPosition is p_lastAccessedPosition ("LPR", e.g. "#1234"). Empty on
 	// FW 5.17.1; may be set on other firmware (UNVERIFIED).
 	LastPosition string
+	// ReadState is p_readState. Seen on device: NULL (not finished),
+	// 1 (at 97–99 %), 2 (at 100 %, "read"), 3 (rare). Meaning UNVERIFIED.
+	ReadState int
 }
 
 // NormTitle makes a title comparable: lower case, no accents, no punctuation,

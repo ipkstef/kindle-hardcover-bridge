@@ -16,9 +16,14 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/sidecar"
 )
 
-// FinishedPercent: at or above this, the book counts as finished. Finishing
-// (status Read) is not built yet, so such books are not sent.
+// FinishedPercent: above this, the book counts as finished (user decision).
+// Fallback: the Kindle marks the book read (p_readState = 2).
 const FinishedPercent = 99.0
+
+// IsFinished applies the finish rule.
+func IsFinished(pct float64, readState int) bool {
+	return pct > FinishedPercent || readState == 2
+}
 
 // ErrNotFound means the waterfall found no confident match.
 var ErrNotFound = errors.New("book not found on Hardcover")
@@ -34,12 +39,13 @@ const (
 
 // Outcome describes what Sync did.
 type Outcome struct {
-	Kind   Kind
-	Title  string // Hardcover title
-	Page   int
-	Pages  int
-	Reason string // for Skipped
-	Added  string // "added to Currently Reading", "moved from Want to Read", or ""
+	Kind     Kind
+	Title    string // Hardcover title
+	Page     int
+	Pages    int
+	Reason   string // for Skipped
+	Added    string // "added to Currently Reading", "moved from Want to Read", or ""
+	Finished bool   // the book was marked Read on Hardcover
 }
 
 // Syncer holds the Hardcover client and a logger.
@@ -148,7 +154,8 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 	for _, n := range notes {
 		s.logf("position: %s", n)
 	}
-	if pct <= 0 {
+	finished := IsFinished(pct, local.ReadState)
+	if pct <= 0 && !finished {
 		return skip(local.Title, "book not started on the Kindle")
 	}
 	s.logf("position: %.2f%% from %s", pct, src)
@@ -164,32 +171,14 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	if local.Percent >= FinishedPercent {
-		return skip(res.Title, "finished book: not built yet")
+	if finished {
+		return s.finish(ctx, local, res, ub)
 	}
 
 	added := ""
 	switch {
 	case ub == nil:
-		// Prefer the edition the ID pointed to (same ebook), else the
-		// book's default ebook/physical edition.
-		editionID := res.EditionID
-		if editionID == nil || res.Pages <= 0 {
-			if de, err := s.C.DefaultEdition(ctx, res.BookID); err != nil {
-				s.logf("sync: default edition: %v", err)
-			} else if de != nil {
-				editionID = &de.ID
-			}
-		}
-		me, err := s.C.Me(ctx)
-		if err != nil {
-			return Outcome{}, err
-		}
-		privacy := 1 // public, as the Hardcover KOReader plugin does
-		if me.PrivacyID != nil {
-			privacy = *me.PrivacyID
-		}
-		nub, err := s.C.InsertUserBook(ctx, res.BookID, hardcover.StatusReading, editionID, privacy)
+		nub, err := s.addUserBook(ctx, res, hardcover.StatusReading)
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -254,6 +243,86 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 		}
 		s.logf("sync: new read %d at page %d/%d", r.ID, page, pages)
 		out.Kind = Sent
+	}
+	return out, nil
+}
+
+// addUserBook puts the book on the user's shelf. Edition: the one the ID
+// pointed to (same ebook), else the default ebook/physical edition. Privacy:
+// the account default, so the user controls visibility on Hardcover
+// (user decision).
+func (s *Syncer) addUserBook(ctx context.Context, res *match.Result, status int) (*hardcover.UserBook, error) {
+	editionID := res.EditionID
+	if editionID == nil || res.Pages <= 0 {
+		if de, err := s.C.DefaultEdition(ctx, res.BookID); err != nil {
+			s.logf("sync: default edition: %v", err)
+		} else if de != nil {
+			editionID = &de.ID
+		}
+	}
+	me, err := s.C.Me(ctx)
+	if err != nil {
+		return nil, err
+	}
+	privacy := 1 // public, as the Hardcover KOReader plugin does
+	if me.PrivacyID != nil {
+		privacy = *me.PrivacyID
+	}
+	return s.C.InsertUserBook(ctx, res.BookID, status, editionID, privacy)
+}
+
+// finish marks the book Read. Order (hardcover-features.md): finish the open
+// read (last page + finished_at), then set status Read, so Hardcover does not
+// add a second, empty finished read.
+func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Result, ub *hardcover.UserBook) (Outcome, error) {
+	today := time.Now().Format("2006-01-02")
+	out := Outcome{Kind: Sent, Title: res.Title, Finished: true}
+	switch {
+	case ub != nil && ub.StatusID == hardcover.StatusRead:
+		s.logf("sync: already Read on Hardcover")
+		return Outcome{Kind: Unchanged, Title: res.Title, Finished: true}, nil
+	case ub != nil && (ub.StatusID == hardcover.StatusDNF || ub.StatusID == hardcover.StatusIgnored):
+		s.logf("sync: not sent: shelf is %s", StatusName(ub.StatusID))
+		return Outcome{Kind: Skipped, Title: res.Title, Reason: "shelf is " + StatusName(ub.StatusID)}, nil
+	case ub == nil:
+		// Not on the shelves: add as Currently Reading first (creates a read),
+		// then finish it below like any other book.
+		nub, err := s.addUserBook(ctx, res, hardcover.StatusReading)
+		if err != nil {
+			return Outcome{}, err
+		}
+		s.logf("sync: auto-added book %d (user_book %d) to finish it", res.BookID, nub.ID)
+		ub, out.Added = nub, "added"
+	}
+	if fresh, err := s.C.UserBookByID(ctx, ub.ID); err == nil {
+		ub = fresh
+	}
+	pages, editionID := ub.Pages()
+	if pages <= 0 && res.Pages > 0 {
+		pages, editionID = res.Pages, res.EditionID
+	}
+	read := ub.CurrentRead()
+	if read == nil {
+		r, err := s.C.InsertRead(ctx, ub.ID, pages, editionID, today)
+		if err != nil {
+			return Outcome{}, err
+		}
+		read = r
+	}
+	if read.EditionID != nil {
+		editionID = read.EditionID
+	}
+	if _, err := s.C.FinishRead(ctx, read.ID, pages, editionID, read.StartedAt, today); err != nil {
+		return Outcome{}, err
+	}
+	if _, err := s.C.SetStatus(ctx, ub.ID, hardcover.StatusRead); err != nil {
+		return Outcome{}, err
+	}
+	s.logf("sync: finished read %d (page %d/%d, %s), status Read (Kindle %.2f%%, read state %d)",
+		read.ID, pages, pages, today, local.Percent, local.ReadState)
+	out.Page, out.Pages = pages, pages
+	if ub.Book.Title != "" {
+		out.Title = ub.Book.Title
 	}
 	return out, nil
 }

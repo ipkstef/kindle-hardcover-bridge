@@ -20,9 +20,10 @@ const (
 	GraphQLEndpoint = "https://api.hardcover.app/v1/graphql"
 )
 
-// DefaultScope is what the bridge needs: who am I, read my library,
-// write reading progress. UNVERIFIED that this set is enough.
-const DefaultScope = "read:me read:library write:library read:catalog"
+// DefaultScope is Hardcover's official "E-Reader / Sync Client" preset
+// (hardcover-docs src/data/scopePresets.ts). write:library also covers
+// journal entries and ratings. No write:reviews (user decision).
+const DefaultScope = "read:catalog read:library write:library read:me:content"
 
 // DeviceCode is the response of the device authorization request (RFC 8628).
 type DeviceCode struct {

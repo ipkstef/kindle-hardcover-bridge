@@ -196,6 +196,9 @@ func (a *app) syncNow(ctx context.Context) error {
 	default:
 		lines := []string{"Hardcover: synced", trim(out.Title, 46),
 			fmt.Sprintf("Page %d of %d (%.0f%%)", out.Page, out.Pages, local.Percent)}
+		if out.Finished {
+			lines[2] = "Finished: status Read"
+		}
 		if out.Added != "" {
 			lines = append(lines, out.Added)
 		}

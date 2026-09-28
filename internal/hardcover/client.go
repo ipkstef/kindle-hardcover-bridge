@@ -11,13 +11,14 @@ import (
 	"strings"
 )
 
-// Status IDs for user_books. From the Hardcover KOReader plugin source
-// (UNVERIFIED against official docs).
+// Status IDs for user_books (hardcover-docs UserBooks.mdx).
 const (
 	StatusWantToRead = 1
 	StatusReading    = 2
 	StatusRead       = 3
+	StatusPaused     = 4
 	StatusDNF        = 5
+	StatusIgnored    = 6
 )
 
 // Client is a small Hardcover GraphQL client.
@@ -254,6 +255,25 @@ func (c *Client) UpdateReadProgress(ctx context.Context, readID, pages int, edit
 		}
 	}`
 	vars := map[string]any{"id": readID, "pages": pages, "editionId": editionID, "startedAt": startedAt}
+	if err := c.Do(ctx, q, vars, &r); err != nil {
+		return nil, err
+	}
+	return r.R.check()
+}
+
+// FinishRead sets progress_pages and finished_at on a read.
+func (c *Client) FinishRead(ctx context.Context, readID, pages int, editionID *int, startedAt *string, finishedAt string) (*Read, error) {
+	var r struct {
+		R readResult `json:"update_user_book_read"`
+	}
+	q := `mutation ($id: Int!, $pages: Int, $editionId: Int, $startedAt: date, $finishedAt: date) {
+		update_user_book_read(id: $id, object: {progress_pages: $pages, edition_id: $editionId,
+			started_at: $startedAt, finished_at: $finishedAt}) {
+			error
+			user_book_read { id started_at finished_at progress_pages edition_id }
+		}
+	}`
+	vars := map[string]any{"id": readID, "pages": pages, "editionId": editionID, "startedAt": startedAt, "finishedAt": finishedAt}
 	if err := c.Do(ctx, q, vars, &r); err != nil {
 		return nil, err
 	}

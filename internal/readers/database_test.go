@@ -17,13 +17,13 @@ func TestCurrentBook(t *testing.T) {
 	stmts := []string{
 		`CREATE TABLE Entries (p_uuid PRIMARY KEY, p_type, p_cdeType, p_cdeKey, p_titles_0_nominal,
 			j_credits, p_location, p_percentFinished, p_lastAccess, p_mimeType,
-			p_publisher, p_publicationDate, p_languages_0, p_lastAccessedPosition)`,
-		`INSERT INTO Entries VALUES ('1','Entry:Item','PDOC','*9de','KUAL','[]','/mnt/us/documents/KUAL.sh',0,300,'text/x-shellscript',NULL,NULL,NULL,NULL)`,
+			p_publisher, p_publicationDate, p_languages_0, p_lastAccessedPosition, p_readState)`,
+		`INSERT INTO Entries VALUES ('1','Entry:Item','PDOC','*9de','KUAL','[]','/mnt/us/documents/KUAL.sh',0,300,'text/x-shellscript',NULL,NULL,NULL,NULL,NULL)`,
 		`INSERT INTO Entries VALUES ('2','Entry:Item','EBOK','f163','A Parade of Horribles',
-			'[{"name":{"display":"Matt Dinniman"},"kind":"Author"}]','/mnt/us/documents/p.azw3',10.723627,200,'application/x-mobi8-ebook','Penguin Group','2024-02-06T00:00:00+0000','en',NULL)`,
-		`INSERT INTO Entries VALUES ('3','Entry:Item','EBOK','7f13','Old Book','[]','/mnt/us/documents/o.mobi',3.5,100,'application/x-mobipocket-ebook',NULL,NULL,NULL,NULL)`,
-		`INSERT INTO Entries VALUES ('4','Entry:Item','EBOK','dddd','Never Opened','[]','/mnt/us/documents/n.mobi',NULL,400,'application/x-mobipocket-ebook',NULL,NULL,NULL,NULL)`,
-		`INSERT INTO Entries VALUES ('5','Collection',NULL,NULL,'My Shelf','[]','c',NULL,500,NULL,NULL,NULL,NULL,NULL)`,
+			'[{"name":{"display":"Matt Dinniman"},"kind":"Author"}]','/mnt/us/documents/p.azw3',10.723627,200,'application/x-mobi8-ebook','Penguin Group','2024-02-06T00:00:00+0000','en',NULL,NULL)`,
+		`INSERT INTO Entries VALUES ('3','Entry:Item','EBOK','7f13','Old Book','[]','/mnt/us/documents/o.mobi',3.5,100,'application/x-mobipocket-ebook',NULL,NULL,NULL,NULL,NULL)`,
+		`INSERT INTO Entries VALUES ('4','Entry:Item','EBOK','dddd','Never Opened','[]','/mnt/us/documents/n.mobi',NULL,400,'application/x-mobipocket-ebook',NULL,NULL,NULL,NULL,NULL)`,
+		`INSERT INTO Entries VALUES ('5','Collection',NULL,NULL,'My Shelf','[]','c',NULL,500,NULL,NULL,NULL,NULL,NULL,NULL)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {

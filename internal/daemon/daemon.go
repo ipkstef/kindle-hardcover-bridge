@@ -121,10 +121,11 @@ func (d *Daemon) Scan(ctx context.Context) error {
 	} else {
 		for k, p := range cur {
 			old, ok := st.Snapshot[k]
-			if (!ok && p.Percent > 0) || (ok && p.Percent != old.Percent) {
+			if (!ok && (p.Percent > 0 || p.ReadState == 2)) ||
+				(ok && (p.Percent != old.Percent || p.ReadState != old.ReadState)) {
 				changed[k] = true
 			}
-			if !ok && p.Percent <= 0 {
+			if !ok && p.Percent <= 0 && p.ReadState != 2 {
 				st.Snapshot[k] = p
 			}
 		}
@@ -197,6 +198,9 @@ func describe(o syncer.Outcome) string {
 		s = "already at page " + itoa(o.Page)
 	case syncer.Skipped:
 		s = "not sent: " + o.Reason
+	}
+	if o.Finished && o.Kind == syncer.Sent {
+		s = "finished: status Read"
 	}
 	if o.Added != "" {
 		s = o.Added + ", " + s
