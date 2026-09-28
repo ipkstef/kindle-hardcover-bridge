@@ -313,5 +313,5 @@ func (r *RateSync) load() *RateState {
 }
 
 func (r *RateSync) save(st *RateState) error {
-	return atomicfile.WriteJSON(r.StatePath, st, 0o600)
+	return atomicfile.GuardedJSON(r.StatePath, st, 0o600)
 }

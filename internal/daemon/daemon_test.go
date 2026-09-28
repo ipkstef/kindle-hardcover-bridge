@@ -244,3 +244,15 @@ func TestNoWriteWhenUnchanged(t *testing.T) {
 		t.Fatal("changed state not written")
 	}
 }
+
+// A book deleted from the Kindle is removed from the state.
+func TestDeletedBookForgotten(t *testing.T) {
+	src := &fakeSrc{m: map[string]readers.Progress{"a": pr(10, 100), "b": pr(20, 200)}}
+	d := newD(t, src, &fakeSync{})
+	d.Scan(context.Background())
+	delete(src.m, "a")
+	d.Scan(context.Background())
+	if _, ok := d.state.Snapshot["a"]; ok || len(d.state.Snapshot) != 1 {
+		t.Fatalf("snapshot %v", d.state.Snapshot)
+	}
+}

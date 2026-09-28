@@ -4,9 +4,47 @@ package atomicfile
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 )
+
+// MinFree: state files are not written when the folder's file system would
+// have less free space than this. /var/local is shared with the Kindle
+// system (cc.db); filling it could break the Kindle.
+var MinFree int64 = 5 << 20
+
+// ErrLowSpace means a write was skipped to keep MinFree free.
+var ErrLowSpace = errors.New("low disk space, not saved")
+
+// Guarded is Write with the free-space check (for state that can be rebuilt
+// or re-sent). Use Write for small files that must never be lost (token).
+func Guarded(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err == nil {
+		free := int64(st.Bavail) * int64(st.Bsize)
+		// The temp file and the old file exist together for a moment.
+		if free-int64(len(data)) < MinFree {
+			return fmt.Errorf("%s: %w (%d KB free)", filepath.Base(path), ErrLowSpace, free>>10)
+		}
+	}
+	return Write(path, data, perm)
+}
+
+// GuardedJSON writes v as indented JSON with Guarded.
+func GuardedJSON(path string, v any, perm os.FileMode) error {
+	b, err := json.MarshalIndent(v, "", " ")
+	if err != nil {
+		return err
+	}
+	return Guarded(path, b, perm)
+}
 
 // Write writes data to path: a unique temp file in the same folder, fsync,
 // rename, then fsync of the folder. Mode is perm (the folder is made 0700).

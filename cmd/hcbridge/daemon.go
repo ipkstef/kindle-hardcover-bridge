@@ -140,6 +140,11 @@ func (a *app) daemon(ctx context.Context) error {
 		caps = append(caps, "inotify: ok")
 	}
 	log.Printf("daemon: started, version %s, pid %d (%s)", version, os.Getpid(), strings.Join(caps, ", "))
+	var fs syscall.Statfs_t
+	if syscall.Statfs(a.stateDir, &fs) == nil {
+		log.Printf("daemon: %s: %d MB free of %d MB", a.stateDir,
+			int64(fs.Bavail)*int64(fs.Bsize)>>20, int64(fs.Blocks)*int64(fs.Bsize)>>20)
+	}
 
 	clips := a.clipSync()
 	ratings := a.rateSync()

@@ -89,7 +89,7 @@ func (d *Daemon) save() error {
 	if fp == d.saved && time.Since(d.savedAt) < saveInterval {
 		return nil // nothing changed: no flash write
 	}
-	if err := atomicfile.WriteJSON(d.StatePath, d.state, 0o600); err != nil {
+	if err := atomicfile.GuardedJSON(d.StatePath, d.state, 0o600); err != nil {
 		return err
 	}
 	d.saved, d.savedAt = fp, time.Now()
@@ -172,6 +172,20 @@ func (d *Daemon) scan(ctx context.Context) error {
 			}
 			if !ok && p.Percent <= 0 && p.ReadState != 2 {
 				st.Snapshot[k] = p
+			}
+		}
+	}
+	// Books deleted from the Kindle: forget them, so the state does not grow
+	// forever. An empty read is ignored (never clear everything).
+	if len(cur) > 0 {
+		for k := range st.Snapshot {
+			if _, ok := cur[k]; !ok {
+				delete(st.Snapshot, k)
+			}
+		}
+		for k := range st.Finished {
+			if _, ok := cur[k]; !ok {
+				delete(st.Finished, k)
 			}
 		}
 	}

@@ -75,5 +75,5 @@ func (c *BookCache) Put(key string, m BookMap) error {
 	}
 	m.Rule = titleRule
 	c.m[key] = m
-	return atomicfile.WriteJSON(c.Path, c.m, 0o600)
+	return atomicfile.GuardedJSON(c.Path, c.m, 0o600)
 }

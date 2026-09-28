@@ -62,6 +62,9 @@ func (c *ClipSync) Run(ctx context.Context, all bool) (sent int, err error) {
 		return 0, err
 	}
 
+	if pruned := pruneSent(st, clips); pruned > 0 {
+		c.S.logf("clips: %d entries of deleted clippings removed from the sent list", pruned)
+	}
 	if migrateIDs(st, clips) {
 		if err := c.save(st); err != nil {
 			return 0, err
@@ -197,6 +200,30 @@ func (c *ClipSync) sendBook(ctx context.Context, title, author string, clips []c
 	return n, nil
 }
 
+// pruneSent removes sent-list entries whose clipping is no longer in
+// My Clippings.txt (deleted by the user or the Kindle). They can never be
+// sent again, so the list does not grow forever. An empty parse result is
+// ignored (a file being rewritten must not clear the list). Entries of the
+// old ID format are kept: migrateIDs moves them.
+func pruneSent(st *ClipState, clips []clippings.Clip) int {
+	if len(clips) == 0 {
+		return 0
+	}
+	keep := make(map[string]bool, 2*len(clips))
+	for _, cl := range clips {
+		keep[cl.ID()] = true
+		keep[cl.LegacyID()] = true
+	}
+	n := 0
+	for id := range st.Sent {
+		if !keep[id] {
+			delete(st.Sent, id)
+			n++
+		}
+	}
+	return n
+}
+
 // migrateIDs moves entries of the sent list from the old, time-zone-based
 // clip ID to the new one. It reports if anything changed.
 func migrateIDs(st *ClipState, clips []clippings.Clip) bool {
@@ -259,7 +286,7 @@ func (c *ClipSync) load() *ClipState {
 }
 
 func (c *ClipSync) save(st *ClipState) error {
-	return atomicfile.WriteJSON(c.StatePath, st, 0o600)
+	return atomicfile.GuardedJSON(c.StatePath, st, 0o600)
 }
 
 // Note/highlight pairing. On the Kindle, a note on a highlight is saved as

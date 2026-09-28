@@ -124,3 +124,15 @@ func TestMigrateIDs(t *testing.T) {
 		t.Fatal("second run changed state")
 	}
 }
+
+// Entries of clippings no longer in the file are removed; others stay.
+func TestPruneSent(t *testing.T) {
+	cl, _ := clippings.Parse(strings.NewReader("Red Rising (Pierce Brown)\n- Your Highlight on Location 1-2 | Added on Monday, September 28, 2026 1:03:31 AM\n\nText\n==========\n"))
+	st := &ClipState{Sent: map[string]int{cl[0].ID(): 1, "gone": 2, cl[0].LegacyID(): 3}}
+	if n := pruneSent(st, cl); n != 1 || len(st.Sent) != 2 {
+		t.Fatalf("pruned %d, left %v", n, st.Sent)
+	}
+	if n := pruneSent(st, nil); n != 0 || len(st.Sent) != 2 {
+		t.Fatalf("empty parse pruned %d", n)
+	}
+}

@@ -1,6 +1,7 @@
 package atomicfile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,5 +26,22 @@ func TestWrite(t *testing.T) {
 	left, _ := filepath.Glob(filepath.Join(filepath.Dir(p), "*.tmp*"))
 	if len(left) != 0 {
 		t.Errorf("temp files left: %v", left)
+	}
+}
+
+func TestGuardedLowSpace(t *testing.T) {
+	old := MinFree
+	defer func() { MinFree = old }()
+	MinFree = 1 << 62 // more than any disk
+	p := filepath.Join(t.TempDir(), "s.json")
+	if err := GuardedJSON(p, 1, 0o600); !errors.Is(err, ErrLowSpace) {
+		t.Fatalf("got %v", err)
+	}
+	if _, err := os.Stat(p); err == nil {
+		t.Fatal("file written")
+	}
+	MinFree = 0
+	if err := GuardedJSON(p, 1, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
