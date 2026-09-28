@@ -250,6 +250,10 @@ func (a *app) daemon(ctx context.Context) error {
 				return nil
 			case w := <-trig:
 				why += ", " + w
+				if w == "rating" {
+					t.Stop() // a star tap does not wait for other events
+					break wait
+				}
 			case <-t.C:
 				break wait
 			}

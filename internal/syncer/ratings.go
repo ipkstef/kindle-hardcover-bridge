@@ -169,7 +169,7 @@ func (r *RateSync) collect(ctx context.Context, st *RateState) (n int, err error
 			if x.CreatedMS > st.LastMS {
 				st.LastMS = x.CreatedMS
 			}
-			r.S.logf("ratings: tap %.0f stars on book %s (%s)", x.Stars, short8(x.BookKey), x.Context)
+			r.S.logf("ratings: tap %g stars on book %s (%s, %s, %s)", x.Stars, short8(x.BookKey), x.Context, x.Action, x.Event)
 		}
 		if len(rs) > 0 && r.OnTap != nil {
 			r.OnTap(rs)

@@ -105,7 +105,10 @@ writer goroutine, fsync writes). b991c98 **works on device** (rating,
 re-read via shelf, stop/start, offline → retry when Wi-Fi is back,
 forward-only shelf). First release = default logic only: shelf choice →
 status sync **off** (`syncShelves`), telemetry and SQLite DB later
-(roadmap "Later"). Open: autostart/no-KUAL install.
+(roadmap "Later"). Rating box (pillow `appAlert1`) shows the real result
+~1–2 s after a star tap; Goodreads unlinked on the Kindle works better
+(stars still recorded, no error). Open: 2 matching books (plan: readers
+margin + tell user), autostart/no-KUAL install.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

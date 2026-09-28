@@ -36,6 +36,7 @@ type Rating struct {
 	Stars     float64
 	Context   string // "end_actions"
 	Event     string // "change_rating"
+	Action    string // "write_rating" (others: UNVERIFIED, logged)
 }
 
 // Ratings returns rating records created after sinceMS, oldest first.
@@ -70,11 +71,15 @@ func ratings(ctx context.Context, path string, sinceMS int64) ([]Rating, error) 
 			Event   string          `json:"event_type"`
 			Rating  json.RawMessage `json:"rating"`
 		}
-		if json.Unmarshal([]byte(rec), &r) != nil || r.Action != "write_rating" || r.Key == "" {
+		// Every record with a book is returned, whatever its action_id: only
+		// "write_rating" was accepted before, and changing stars without
+		// clearing them first was lost (device 2026-09-28; its action_id is
+		// UNVERIFIED). The caller sends 1-5 stars and logs the rest.
+		if json.Unmarshal([]byte(rec), &r) != nil || r.Key == "" {
 			continue
 		}
 		out = append(out, Rating{ID: id, CreatedMS: ts, BookKey: r.Key, Stars: stars(r.Rating),
-			Context: r.Context, Event: r.Event})
+			Context: r.Context, Event: r.Event, Action: r.Action})
 	}
 	return out, rows.Err()
 }

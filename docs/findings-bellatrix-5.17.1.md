@@ -385,3 +385,15 @@ system log (`/var/log/messages`) names each window:
   found, rating dropped. Now the box shows the real result (saved / not
   found / sent later), ~1–2 s after the tap.
 - Dungeon Crawler Carl: Kindle read state 2 at 97.53 % → finished (rule).
+
+## Goodreads unlinked, version 83ebc1b (2026-09-28 17:46–17:51)
+- **With Goodreads unlinked on the Kindle, the end-of-book stars still work**
+  and still write `goodreads_book_ratings` to fmcache.db; no Goodreads
+  error box. User decision: keep Goodreads unlinked with hcbridge.
+- Ratings sent in ~1 s (Mother of Learning ARC 2: 5 stars) — but ~5 s when a
+  "network up" event came first (debounce). Fixed: a tap ends the wait.
+- Changing stars on a book that already had stars (no X first) was not
+  seen. Only `action_id: write_rating` was accepted; the change probably
+  uses another action_id (UNVERIFIED). Now all rating records with a book
+  are read and logged (`tap N stars … (context, action, event)`); 1–5 stars
+  are sent, others ignored. Clearing with X then tapping works.
