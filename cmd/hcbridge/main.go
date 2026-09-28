@@ -9,6 +9,7 @@
 //	hcbridge clips    send new highlights/notes (private journal entries)
 //	hcbridge clipsall send all highlights/notes, also old ones
 //	hcbridge savelog  copy the log to the USB drive
+//	hcbridge dialogprobe record the "Rating Error" dialog (research, 3 min)
 //	hcbridge whoami   show the signed-in user
 //	hcbridge logout   delete the saved token
 package main
@@ -72,7 +73,7 @@ func main() {
 	scope := fs.String("scope", hardcover.DefaultScope, "OAuth scopes")
 	row := fs.Int("row", 3, "first screen row for messages")
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: hcbridge login|daemon|stop|status|sync|identify|clips|clipsall|savelog|whoami|logout [flags]")
+		fmt.Fprintln(os.Stderr, "usage: hcbridge login|daemon|stop|status|sync|identify|clips|clipsall|savelog|dialogprobe|whoami|logout [flags]")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
@@ -108,6 +109,8 @@ func main() {
 		err = a.clipsNow(ctx, cmd == "clipsall")
 	case "savelog":
 		err = a.saveLog()
+	case "dialogprobe":
+		err = a.dialogProbe(ctx)
 	case "whoami":
 		err = a.whoami(ctx)
 	case "logout":

@@ -50,6 +50,11 @@
 					"action": "/bin/sh ./run.sh savelog"
 				},
 				{
+					"name": "Dialog probe (research, 3 min)",
+					"priority": 12,
+					"action": "/bin/sh ./run.sh dialogprobe"
+				},
+				{
 					"name": "Who am I",
 					"priority": 10,
 					"action": "/bin/sh ./run.sh whoami"
