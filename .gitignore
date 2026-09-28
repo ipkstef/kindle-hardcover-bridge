@@ -1,2 +1,4 @@
 dist/
 packaging/kual/hcprobe/bin/
+packaging/kual/hcbridge/bin/
+packaging/kual/hcbridge/client_id.txt

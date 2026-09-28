@@ -74,9 +74,8 @@ Steps: open book, turn pages, go Home, reopen, turn pages, sleep.
 
 Conclusions:
 1. **Going Home writes `p_percentFinished`.** This is the main sync trigger.
-2. **Sleep writes `cc.db` and `.azw3f`.** It is **UNVERIFIED** if sleep also
-   writes a new percent (the percent did not change here; maybe no pages were
-   turned after reopen).
+2. **Sleep writes `cc.db` and `.azw3f`, but not the new percent.** The user
+   confirmed pages were turned after reopen; the percent stayed the same.
 3. Page turns do not write anything (test 1).
 4. `lipc-get-prop com.lab126.powerd state` gives `active`, `screenSaver`,
    `readyToSuspend`. Background processes stop when the device suspends.

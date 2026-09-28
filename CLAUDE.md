@@ -42,6 +42,7 @@ internal/readers/    database, filesystem, lipc, pagemap backends
 internal/book/       book identity (ASIN, title, author, ISBN)
 internal/hardcover/  OAuth device flow, token refresh, GraphQL client
 internal/config/     config + token storage
+cmd/hcbridge/        prototype CLI: login, sync, whoami, logout
 cmd/probe/           one-shot device test (see docs/probe.md)
 internal/certs/      bundled CA roots
 packaging/           KUAL extension / install scripts
@@ -50,14 +51,17 @@ docs/                context docs (read these)
 ```
 
 ## Where we left off
-Research phase. Probe ran on the user's Kindle (kernel 4.9, FW 5.17.1): Go
-works, HTTPS works. `cc.db` has percent, not location; books are sideloaded (no
-ASIN). Percent is written to `cc.db` on go-Home (book close) and maybe on
-sleep, never on page turn. See `docs/findings-bellatrix-5.17.1.md`. Go version
-is still open (needs an old-kernel device). Next:
-- A) Read `kindle-reading-dashboard` + NickelHardcover source; list exact `cc.db`
-  fields and Hardcover mutations needed.
-- B) Prototype: device-code login + one progress update to Hardcover.
+Research done for FW 5.17.1: percent is in `cc.db`, written on go-Home only
+(not page turn, not sleep). See `docs/findings-bellatrix-5.17.1.md`.
+
+Option B prototype built (`cmd/hcbridge`, KUAL menu "Hardcover", see
+`docs/prototype.md`): device-code sign-in + one manual sync. It only syncs a book
+that is already in the user's Hardcover "Currently Reading" list and matches by
+title + author (never guesses). **Not yet run on the device.** Waiting for the
+user's Hardcover OAuth client ID.
+
+Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
+Go version still open (needs an old-kernel device); builds use Go 1.23.
 
 ## Docs
 - `docs/architecture.md` — data flow and sync loop
@@ -67,6 +71,7 @@ is still open (needs an old-kernel device). Next:
 - `docs/references.md` — links and prior art
 - `docs/probe.md` — device probe: what it checks, how to run it
 - `docs/findings-bellatrix-5.17.1.md` — results from the user's Kindle
+- `docs/prototype.md` — hcbridge prototype: setup and test steps
 
 ## Working rules for Claude
 - Mark anything not verified on a real device or in real docs as **UNVERIFIED**.

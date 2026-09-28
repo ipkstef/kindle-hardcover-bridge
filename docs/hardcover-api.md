@@ -25,15 +25,36 @@ query CurrentlyReading {
 }
 ```
 
+## Progress mutations (from the KOReader plugin source)
+Source: `Billiam/hardcoverapp.koplugin`, `hardcover/lib/hardcover_api.lua`.
+**UNVERIFIED** against official docs (docs.hardcover.app is blocked in the dev
+sandbox). Used in `internal/hardcover/client.go`.
+
+- Progress is set in **pages** (`progress_pages`). Page = percent × edition
+  pages (the plugin does the same).
+- Status IDs: 1 want to read, 2 currently reading, 3 read, 5 DNF.
+- `me { id username }` returns a list with one user.
+- Update an open read:
+  ```graphql
+  mutation ($id: Int!, $pages: Int, $editionId: Int, $startedAt: date) {
+    update_user_book_read(id: $id, object: {progress_pages: $pages, edition_id: $editionId, started_at: $startedAt}) {
+      error
+      user_book_read { id progress_pages }
+    }
+  }
+  ```
+- Start a new read: `insert_user_book_read(user_book_id: $id, user_book_read: {...})`,
+  same fields.
+- Open read = newest `user_book_reads` row with `finished_at = null`.
+- Page count: read's edition → user book's edition → `book.pages`.
+
 **UNVERIFIED / TODO:**
-- Exact mutation(s) to update progress (check the User Books schema page and the
-  KOReader plugin / NickelHardcover source).
-- Whether progress can be set by percent, or only by pages (then we need edition
-  page count to convert).
 - Book lookup by ASIN / ISBN (see "Searching" guide and "ISBN and ASIN" page).
 - Rate limits.
-- Needed OAuth scopes for writing progress (see "Actions & Scopes" page). The
-  demo uses only `read:me:content`, which is not enough for writes.
+- Needed OAuth scopes. Scope names confirmed from live server metadata (see
+  findings). Prototype asks for `read:me read:library write:library
+  read:catalog`; not yet tested.
+- Shape of `book.cached_contributors` (assumed `[{"author":{"name":...}}]`).
 
 ## OAuth: Device Authorization Grant (use this on Kindle)
 Guide: https://docs.hardcover.app/api/oauth/getting-started-device/
