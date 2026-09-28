@@ -37,14 +37,12 @@ type RateSync struct {
 	Books     BookByKey
 	Path      string // fmcache.db
 	StatePath string
-	// OnTap is called when a new star tap is read (daemon: log the dialog).
-	OnTap func()
+	// OnTap is called with new star taps as soon as they are read, before
+	// any network call (daemon: tell the user at once).
+	OnTap func(taps []metrics.Rating)
 	// OnReread is called when a shelf choice starts a re-read (daemon: clear
 	// its "finished" mark for the book).
 	OnReread func(key string)
-	// OnRated is called after a rating was saved on Hardcover (daemon: show
-	// a message, because the Kindle shows a Goodreads error for the tap).
-	OnRated func(title string, stars float64)
 	// SyncShelves sends the Goodreads shelf choice from the end-of-book
 	// dialog as a Hardcover status. Off in the first release (user decision
 	// 2026-09-28: default logic only); the code stays for a later release.
@@ -161,7 +159,7 @@ func (r *RateSync) collect(ctx context.Context, st *RateState) (n int, err error
 			r.S.logf("ratings: tap %.0f stars on book %s (%s)", x.Stars, short8(x.BookKey), x.Context)
 		}
 		if len(rs) > 0 && r.OnTap != nil {
-			r.OnTap()
+			r.OnTap(rs)
 		}
 		other, err := metrics.Records(ctx, r.Path, st.OtherMS, researchSchemas...)
 		if err != nil {
@@ -236,9 +234,6 @@ func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) error {
 		return err
 	}
 	r.S.logf("ratings: %q rated %g stars (user_book %d)", local.Title, x.Stars, ub.ID)
-	if r.OnRated != nil {
-		r.OnRated(res.Title, x.Stars)
-	}
 	return nil
 }
 

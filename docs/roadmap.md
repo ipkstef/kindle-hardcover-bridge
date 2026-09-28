@@ -121,9 +121,12 @@ Proposed rule (**to confirm with a test**):
   only logged.
 - **Telemetry to S3** (out of scope for now): design in
   `docs/decisions/telemetry.md`.
-- **Rating Error dialog — C built 2026-09-28:** after a rating is saved,
-  the daemon shows the Kindle's system alert `appAlert1` ("…stars saved to
-  Hardcover. You can ignore a Goodreads rating error.", closes after 8 s).
+- **Rating Error dialog — C built 2026-09-28:** as soon as a star tap is
+  read (before the network call), the daemon shows the Kindle's system
+  alert `appAlert1` ("…stars will be saved to Hardcover. You can ignore a
+  Goodreads rating error.", closes after 8 s), after waiting ≤ 3 s for the
+  Goodreads error box so ours is on top. The rating is sent at once (no
+  debounce). First version (alert after the send) came 6–8 s late (user).
   B (close the error box) dropped: fake taps need ASR/eat-tap mode and
   per-model coordinates. **Half-star picker:** needs our own pillow dialog
   with buttons and a reply channel; both need system changes or an

@@ -31,8 +31,10 @@ const (
 	// works harder near it, so memory is given back sooner on small devices.
 	// Idle RSS was ~12 MB (x86-64, 2026-09-28).
 	memLimit = 24 << 20
-	// alertHideMs: our "rating saved" box closes itself after this time.
+	// alertHideMs: our rating box closes itself after this time.
 	alertHideMs = 8000
+	// alertWait: longest wait for the Goodreads error box before ours.
+	alertWait = 3 * time.Second
 )
 
 func (a *app) pidPath() string   { return filepath.Join(a.stateDir, "daemon.pid") }
@@ -151,16 +153,18 @@ func (a *app) daemon(ctx context.Context) error {
 
 	clips := a.clipSync()
 	ratings := a.rateSync()
-	ratings.OnTap = func() { go logDialog(ctx) }
 	// The Kindle shows "Rating Error" for a Goodreads call it cannot make
-	// (sideloaded books, probe 2026-09-28). Tell the user the rating is safe
-	// (option C): the Kindle's own system alert, closes by itself.
-	ratings.OnRated = func(title string, stars float64) {
-		text := fmt.Sprintf("%s: %g of 5 stars saved to Hardcover. You can ignore a Goodreads rating error.",
-			title, stars)
-		if err := screen.Alert("Hardcover", text, alertHideMs); err != nil {
-			log.Printf("daemon: alert: %v", err)
+	// (sideloaded books, probe 2026-09-28). Tell the user at once that the
+	// rating goes to Hardcover (option C): show our box as soon as the tap
+	// is read, before any network call; it is sent right after, or later if
+	// offline.
+	ratings.OnTap = func(taps []metrics.Rating) {
+		x := taps[len(taps)-1]
+		title := "this book"
+		if b, err := a.db.BookByKey(ctx, x.BookKey); err == nil && b.Title != "" {
+			title = b.Title
 		}
+		go ratingAlert(ctx, title, x.Stars)
 	}
 	runRatings := func(ctx context.Context) {
 		if n, err := ratings.Run(ctx); err != nil {
@@ -225,8 +229,13 @@ func (a *app) daemon(ctx context.Context) error {
 			}
 			why = "poll"
 		}
-		// Debounce: more triggers in the next seconds join this scan.
-		t := time.NewTimer(debounce)
+		// Debounce: more triggers in the next seconds join this scan. A star
+		// tap is sent at once (the user is looking at the screen).
+		wait := debounce
+		if why == "rating" {
+			wait = 0
+		}
+		t := time.NewTimer(wait)
 	wait:
 		for {
 			select {
@@ -250,19 +259,20 @@ func readerOpen(ctx context.Context) bool {
 	return strings.Contains(lipcGet(ctx, "com.lab126.winmgr", "getActiveAppTitle"), "com.lab126.booklet.reader")
 }
 
-// logDialog records the window manager state for 20 s after a star tap, to
-// learn how the "Rating Error" dialog can be closed or replaced. Read-only.
-func logDialog(ctx context.Context) {
-	last := ""
-	for i := 0; i < 40 && ctx.Err() == nil; i++ {
-		n := lipcGet(ctx, "com.lab126.winmgr", "activeDialogCount")
-		title := lipcGet(ctx, "com.lab126.winmgr", "getActiveAppTitle")
-		cur := n + " | " + title
-		if cur != last {
-			log.Printf("research: dialogs %s", cur)
-			last = cur
+// ratingAlert shows "N stars → Hardcover" on top of the Kindle's Goodreads
+// error box: it waits until that box is open (a second dialog, at most
+// alertWait), so ours is not hidden under it.
+func ratingAlert(ctx context.Context, title string, stars float64) {
+	for end := time.Now().Add(alertWait); time.Now().Before(end) && ctx.Err() == nil; {
+		if n, _ := strconv.Atoi(lipcGet(ctx, "com.lab126.winmgr", "activeDialogCount")); n >= 2 {
+			break
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
+	}
+	text := fmt.Sprintf("%s: %g of 5 stars will be saved to Hardcover. You can ignore a Goodreads rating error.",
+		title, stars)
+	if err := screen.Alert("Hardcover", text, alertHideMs); err != nil {
+		log.Printf("daemon: alert: %v", err)
 	}
 }
 
@@ -294,7 +304,9 @@ func watchRatings(ctx context.Context, dir string, fn func(context.Context)) {
 				return
 			case <-kick:
 			}
-			time.Sleep(time.Second) // let the Kindle finish its write
+			// The trigger is the end of the Kindle's commit; a short pause
+			// lets a burst of commits join one read.
+			time.Sleep(300 * time.Millisecond)
 			fn(ctx)
 		}
 	}()
