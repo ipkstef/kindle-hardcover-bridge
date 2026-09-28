@@ -110,7 +110,13 @@ func (c *ClipSync) Run(ctx context.Context, all bool) (sent int, err error) {
 		n, err := c.sendBook(ctx, k.title, k.author, groups[k], st)
 		sent += n
 		if err != nil {
+			_ = c.save(st) // keep what was sent (e.g. Wi-Fi lost mid-book)
 			return sent, err
+		}
+		if n > 0 {
+			if err := c.save(st); err != nil {
+				return sent, err
+			}
 		}
 		if n < len(groups[k]) {
 			complete = false
@@ -179,8 +185,13 @@ func (c *ClipSync) sendBook(ctx context.Context, title, author string, clips []c
 		st.Sent[cl.ID()] = jid
 		n++
 		c.S.logf("clips: %q: %s at location %d → private journal %d", res.Title, e.Event, cl.LocStart, jid)
-		if err := c.save(st); err != nil {
-			return n, err
+		// Save every saveEvery clips, not after each one (an import of
+		// thousands would rewrite a growing file thousands of times). A
+		// power loss can then send at most saveEvery-1 clips twice.
+		if n%saveEvery == 0 {
+			if err := c.save(st); err != nil {
+				return n, err
+			}
 		}
 	}
 	return n, nil
@@ -205,6 +216,8 @@ func migrateIDs(st *ClipState, clips []clippings.Clip) bool {
 	}
 	return changed
 }
+
+const saveEvery = 20
 
 func (c *ClipSync) findLocal(ctx context.Context, title, author string) *book.Local {
 	books, err := c.Books.BooksByTitle(ctx, title)

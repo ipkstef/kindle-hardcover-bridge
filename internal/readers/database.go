@@ -33,8 +33,16 @@ const bookColumns = `p_cdeKey, p_titles_0_nominal, j_credits, p_location,
 	p_publisher, CAST(p_publicationDate AS TEXT), p_languages_0,
 	CAST(p_lastAccessedPosition AS TEXT), p_readState`
 
+// open opens cc.db read-only. One connection only: each call runs one short
+// query and closes the DB, so the Kindle's writer waits as little as
+// possible.
 func (d *Database) open() (*sql.DB, error) {
-	return sql.Open("sqlite", "file:"+d.Path+"?mode=ro&_pragma=busy_timeout(5000)")
+	db, err := sql.Open("sqlite", "file:"+d.Path+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	return db, nil
 }
 
 // CurrentBook returns the opened book with the latest p_lastAccess.

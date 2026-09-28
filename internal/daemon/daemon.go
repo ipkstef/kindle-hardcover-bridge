@@ -53,8 +53,10 @@ type Daemon struct {
 	// After runs at the end of each scan (e.g. highlight/note sync).
 	After func(ctx context.Context)
 
-	mu    sync.Mutex
-	state *State
+	mu      sync.Mutex
+	state   *State
+	saved   string    // fingerprint of the state last written
+	savedAt time.Time // when it was written
 
 	// rereads: keys queued by ClearFinished, applied at the next scan. A
 	// separate lock, so ClearFinished never waits for a running scan.
@@ -78,8 +80,29 @@ func LoadState(path string) (*State, error) {
 	return st, nil
 }
 
+// saveInterval: an unchanged state is still written this often, so
+// "Last check" in the status screen stays about right.
+const saveInterval = time.Hour
+
 func (d *Daemon) save() error {
-	return atomicfile.WriteJSON(d.StatePath, d.state, 0o600)
+	fp := fingerprint(d.state)
+	if fp == d.saved && time.Since(d.savedAt) < saveInterval {
+		return nil // nothing changed: no flash write
+	}
+	if err := atomicfile.WriteJSON(d.StatePath, d.state, 0o600); err != nil {
+		return err
+	}
+	d.saved, d.savedAt = fp, time.Now()
+	return nil
+}
+
+// fingerprint is the state without the scan time (maps are written in key
+// order, so equal states give equal strings).
+func fingerprint(st *State) string {
+	cp := *st
+	cp.LastScan = time.Time{}
+	b, _ := json.Marshal(cp)
+	return string(b)
 }
 
 // Scan compares cc.db with the snapshot and syncs changed books, then runs
@@ -101,6 +124,7 @@ func (d *Daemon) scan(ctx context.Context) error {
 			return err
 		}
 		d.state = st
+		d.saved = fingerprint(st)
 	}
 	st := d.state
 	if st.Pending == nil {

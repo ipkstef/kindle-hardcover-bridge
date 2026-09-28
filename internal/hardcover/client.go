@@ -359,13 +359,23 @@ func (c *Client) UserBookForBook(ctx context.Context, userID, bookID int) (*User
 	return &r.UBs[0], nil
 }
 
-// Library returns all books on the user's shelves (any status).
+// libraryFields: only what the title + author match needs. The full
+// userBookFields (all reads, editions) made the response for a large
+// library several MB (review 2026-09-28).
+const libraryFields = `
+	id
+	book_id
+	status_id
+	book { title cached_contributors }`
+
+// Library returns all books on the user's shelves (any status), with only
+// the fields for matching: no editions, no reads.
 func (c *Client) Library(ctx context.Context, userID int) ([]UserBook, error) {
 	var r struct {
 		UserBooks []UserBook `json:"user_books"`
 	}
 	q := `query ($userId: Int!) {
-		user_books(where: {user_id: {_eq: $userId}}, limit: 5000) {` + userBookFields + `}
+		user_books(where: {user_id: {_eq: $userId}}, limit: 5000) {` + libraryFields + `}
 	}`
 	if err := c.Do(ctx, q, map[string]any{"userId": userID}, &r); err != nil {
 		return nil, err

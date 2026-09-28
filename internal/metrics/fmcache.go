@@ -39,7 +39,7 @@ type Rating struct {
 
 // Ratings returns rating records created after sinceMS, oldest first.
 func Ratings(ctx context.Context, path string, sinceMS int64) ([]Rating, error) {
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(3000)")
+	db, err := openRO(path)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ type Record struct {
 // one of prefixes, oldest first. Used to learn formats (research) and to read
 // Goodreads shelf choices from the end-of-book dialog.
 func Records(ctx context.Context, path string, sinceMS int64, prefixes ...string) ([]Record, error) {
-	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(3000)")
+	db, err := openRO(path)
 	if err != nil {
 		return nil, err
 	}
@@ -175,4 +175,15 @@ func ShelfChoice(recJSON string) (status int, bookKey, raw string) {
 		return ShelfNone, bookKey, v
 	}
 	return ShelfNone, bookKey, ""
+}
+
+// openRO opens fmcache.db read-only with one connection (the Kindle writes
+// it; we only read).
+func openRO(path string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(3000)")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	return db, nil
 }

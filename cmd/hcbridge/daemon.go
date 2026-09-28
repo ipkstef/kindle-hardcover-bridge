@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -25,6 +26,10 @@ const (
 	debounce = 5 * time.Second
 	// safetyPoll: scan at least this often while the device is awake.
 	safetyPoll = 15 * time.Minute
+	// memLimit: soft heap limit for the Go runtime. The garbage collector
+	// works harder near it, so memory is given back sooner on small devices.
+	// Idle RSS was ~12 MB (x86-64, 2026-09-28).
+	memLimit = 24 << 20
 )
 
 func (a *app) pidPath() string   { return filepath.Join(a.stateDir, "daemon.pid") }
@@ -40,6 +45,7 @@ func (a *app) statePath() string { return filepath.Join(a.stateDir, "state.json"
 //
 // Each source is optional; the daemon works with any subset.
 func (a *app) daemon(ctx context.Context) error {
+	debug.SetMemoryLimit(memLimit)
 	if err := os.MkdirAll(a.stateDir, 0o700); err != nil {
 		return err
 	}
@@ -194,6 +200,11 @@ func (a *app) daemon(ctx context.Context) error {
 			return nil
 		case why = <-trig:
 		case <-poll.C:
+			if readerOpen(ctx) {
+				// The Kindle writes cc.db when the user leaves the book or
+				// sleeps; both are events. Do not read cc.db meanwhile.
+				continue
+			}
 			why = "poll"
 		}
 		// Debounce: more triggers in the next seconds join this scan.
@@ -213,6 +224,12 @@ func (a *app) daemon(ctx context.Context) error {
 		}
 		scan(why)
 	}
+}
+
+// readerOpen reports if the stock reader is the active window (winmgr).
+// Without LIPC it reports false, so the poll still runs.
+func readerOpen(ctx context.Context) bool {
+	return strings.Contains(lipcGet(ctx, "com.lab126.winmgr", "getActiveAppTitle"), "com.lab126.booklet.reader")
 }
 
 // logDialog records the window manager state for 20 s after a star tap, to

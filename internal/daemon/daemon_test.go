@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -222,5 +223,24 @@ func TestClearFinishedDoesNotBlock(t *testing.T) {
 	d.mu.Unlock()
 	if err := d.Scan(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A scan with no change does not write the state file again.
+func TestNoWriteWhenUnchanged(t *testing.T) {
+	src := &fakeSrc{m: map[string]readers.Progress{"a": pr(10, 100)}}
+	d := newD(t, src, &fakeSync{})
+	d.Scan(context.Background())
+	if err := os.Remove(d.StatePath); err != nil {
+		t.Fatal(err)
+	}
+	d.Scan(context.Background())
+	if _, err := os.Stat(d.StatePath); err == nil {
+		t.Fatal("unchanged state was written again")
+	}
+	src.m["a"] = pr(20, 200)
+	d.Scan(context.Background())
+	if _, err := os.Stat(d.StatePath); err != nil {
+		t.Fatal("changed state not written")
 	}
 }
