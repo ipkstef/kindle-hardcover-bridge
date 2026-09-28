@@ -291,3 +291,14 @@ tap (read-only research).
 - Open (user decision): choosing "Currently Reading" in the end-of-book
   dialog after a finish — treat as a re-read and clear the daemon's
   "finished" mark? Now progress for that book is held until < 5 %.
+
+## Version b991c98 on device (2026-09-28, 07:02–07:05 UTC)
+- Rating 2 stars on Red Rising: sent ~5 s after the tap (watcher copies the
+  tap, the scan loop sends it; debounce 5 s).
+- Shelf `currently-reading` after a finish (`widget_invoked_by:
+  InvokedByBookFinish`, `PerformManualShelving`: a user tap, not automatic)
+  → **re-read**: status Currently Reading, Hardcover's open read 6944544
+  set to page 0.
+- Stop, then Start: clean (no hang).
+- Not tested yet: offline (Wi-Fi off → go Home → Wi-Fi on), shelf
+  forward-only (`to-read` on a Read book).

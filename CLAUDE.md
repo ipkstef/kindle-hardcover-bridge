@@ -101,7 +101,8 @@ core first**; later items (SQLite state DB, Rating Error dialog B+C) are in
 or back under 5 %). Code review 2026-09-28: HIGH fixes done (deadlock,
 offline ≠ not found, no retry limit while offline, token refresh lock,
 subtitle-safe title match, forward-only shelf, zone-free clip IDs, one
-writer goroutine, fsync writes) — **not yet tested on device**.
+writer goroutine, fsync writes). b991c98 **works on device** (rating,
+re-read via shelf, stop/start); offline test still open.
 Open: autostart/no-KUAL install.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
