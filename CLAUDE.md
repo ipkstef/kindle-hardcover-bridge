@@ -113,6 +113,8 @@ Go version still open (needs an old-kernel device); builds use Go 1.23.
 - `docs/prototype.md` — hcbridge prototype: setup and test steps
 - `docs/roadmap.md` — user goals and plan to the end product
 - `docs/hardcover-features.md` — journals, ratings, finish, re-read, scopes, limits
+- `docs/decisions/embedded-db.md` — state DB choice (modernc sqlite, later)
+- `docs/decisions/telemetry.md` — opt-in telemetry to S3 (draft, user decisions open)
 
 ## Working rules for Claude
 - Mark anything not verified on a real device or in real docs as **UNVERIFIED**.
