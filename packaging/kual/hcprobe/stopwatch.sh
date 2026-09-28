@@ -2,7 +2,7 @@
 # Stop a running watch (item 3) and events watch (item 5) early.
 say() { command -v eips >/dev/null 2>&1 && eips 1 2 "$1                              "; }
 stopped=""
-for P in /tmp/hcprobe-watch.pid /tmp/hcprobe-events.pid; do
+for P in /tmp/hcprobe-watch.pid /tmp/hcprobe-events.pid /tmp/hcprobe-sleep.pid; do
 	if [ -f "$P" ] && kill "$(cat "$P")" 2>/dev/null; then
 		stopped="yes"
 	fi

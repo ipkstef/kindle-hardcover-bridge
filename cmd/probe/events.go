@@ -42,7 +42,7 @@ func (l *logger) printf(format string, a ...any) {
 	l.f.Sync()
 }
 
-func events(args []string) int {
+func eventsProbe(args []string) int {
 	fs := flag.NewFlagSet("events", flag.ExitOnError)
 	out := fs.String("out", "/mnt/us/hcprobe-events.txt", "log file")
 	dbPath := fs.String("db", "/var/local/cc.db", "cc.db path")

@@ -33,6 +33,11 @@
 					"name": "6. Scan book IDs",
 					"priority": 6,
 					"action": "/bin/sh ./ids.sh"
+				},
+				{
+					"name": "7. Sleep research (45 min)",
+					"priority": 7,
+					"action": "/bin/sh ./sleep.sh"
 				}
 			]
 		}

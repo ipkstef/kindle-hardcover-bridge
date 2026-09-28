@@ -19,6 +19,12 @@ See findings "Events test". Design:
 - `lipc-wait-event` is a Kindle tool, not curl/Python; exists on FW 5.x.
   Present on old firmware: **UNVERIFIED**. inotify needs only the kernel.
 
+## 1b. Sleep inside a book (user: this matters)
+cc.db percent is written only on go-Home, not on sleep (tests 1–2). Many
+readers never go Home. Candidates for a position written on sleep: the
+book's sidecar (`.azw3f` written on sleep, test 2), LIPC reader properties,
+other `/var/local` DBs (e.g. `wsync.db`). Probe item 7 records all of them.
+
 ## 2. Find the book on Hardcover (waterfall) — works on device (ISBN + library steps)
 Code: `internal/book/identity.go` (collect IDs), `internal/match/resolve.go`
 (waterfall). Rule from the user: read **every** field; do not assume one tool

@@ -55,5 +55,23 @@ Writes `/mnt/us/hcprobe-ids.txt`: per book, key (8 chars), type, file type,
 ISBN (EXTH 104), ASIN (EXTH 113/504), read state, percent. No titles. KFX is
 not parsed.
 
+## Sleep research (menu item 7)
+Goal: find a position source that is written when the user **sleeps inside a
+book** (cc.db percent is only written on go-Home). Runs 45 min; stop early
+with item 4. Output folder `/mnt/us/hcprobe-sleep/`:
+- `timeline.txt`: every LIPC event (powerd, appmgrd, wifid, cmd, reader
+  services) and inotify event (`/var/local`, the book's `.sdr` folder).
+- `lipc-all.txt`: `lipc-probe -l` and `lipc-probe -a -v`, once.
+- `NN-<event>/report.txt` at start, open/leave book, screensaver, suspend,
+  wake, Wi-Fi up/down, sidecar write, every 2 min: power + Wi-Fi state, cc.db
+  row (percent, last access, `p_lastAccessedPosition`, read state), sidecar
+  files (size, time, hash), reader LIPC services (if changed), changed files in
+  `/var/local` with table dumps of changed SQLite DBs (3 newest rows).
+- `NN-<event>/sdr/sidecar.<ext>`: raw copy of each changed sidecar file (name
+  without title).
+
+Privacy: sidecar files may hold highlights/notes; DB dumps may hold account
+data. Review before sharing.
+
 Status: the report (item 1) ran OK on one Kindle (FW 5.17.1). The watch
 (items 3–4) is **UNVERIFIED** on a device.

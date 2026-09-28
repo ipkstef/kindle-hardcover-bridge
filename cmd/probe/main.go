@@ -3,6 +3,7 @@
 //	probe [url]          HTTPS test: can a static Go binary reach Hardcover?
 //	probe events [flags] log file and LIPC events (what can trigger a sync?)
 //	probe ids [flags]    list ISBN / ASIN found inside the book files
+//	probe sleep [flags]  record all position sources at each event (sleep research)
 package main
 
 import (
@@ -24,9 +25,11 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "events":
-			os.Exit(events(os.Args[2:]))
+			os.Exit(eventsProbe(os.Args[2:]))
 		case "ids":
 			os.Exit(ids(os.Args[2:]))
+		case "sleep":
+			os.Exit(sleepProbe(os.Args[2:]))
 		}
 	}
 	httpsTest()

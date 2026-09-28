@@ -70,6 +70,9 @@ Auto-add **works on device** (Red Rising: added via ISBN, page set).
 Daemon core is **work in progress** (`hcbridge daemon`, `internal/daemon`,
 `internal/events`, `internal/syncer`): built and unit-tested, not run on the
 device. The user wants to **discuss system design before it is locked in**.
+User: syncing when sleeping **inside** a book matters (no go-Home). Probe item 7
+(sleep research) built to find a position source written on sleep; waiting for
+results.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.
