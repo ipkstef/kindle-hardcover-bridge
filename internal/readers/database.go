@@ -34,7 +34,8 @@ func (d *Database) CurrentBook(ctx context.Context) (*book.Local, error) {
 
 	row := db.QueryRowContext(ctx, `
 		SELECT p_cdeKey, p_titles_0_nominal, j_credits, p_location,
-		       p_percentFinished, p_lastAccess
+		       p_percentFinished, p_lastAccess, p_cdeType, p_mimeType,
+		       p_publisher, CAST(p_publicationDate AS TEXT), p_languages_0
 		FROM Entries
 		WHERE p_type = 'Entry:Item' AND p_cdeType IN ('EBOK', 'PDOC')
 		  AND p_percentFinished IS NOT NULL AND p_lastAccess IS NOT NULL
@@ -42,11 +43,13 @@ func (d *Database) CurrentBook(ctx context.Context) (*book.Local, error) {
 		ORDER BY p_lastAccess DESC
 		LIMIT 1`)
 	var (
-		key, title, credits, path sql.NullString
-		percent                   sql.NullFloat64
-		last                      sql.NullInt64
+		key, title, credits, path               sql.NullString
+		cdeType, mime, publisher, pubDate, lang sql.NullString
+		percent                                 sql.NullFloat64
+		last                                    sql.NullInt64
 	)
-	if err := row.Scan(&key, &title, &credits, &path, &percent, &last); err != nil {
+	if err := row.Scan(&key, &title, &credits, &path, &percent, &last,
+		&cdeType, &mime, &publisher, &pubDate, &lang); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNoBook
 		}
@@ -59,6 +62,11 @@ func (d *Database) CurrentBook(ctx context.Context) (*book.Local, error) {
 		Path:       path.String,
 		Percent:    percent.Float64,
 		LastAccess: last.Int64,
+		CDEType:    cdeType.String,
+		MimeType:   mime.String,
+		Publisher:  publisher.String,
+		PubDate:    pubDate.String,
+		Language:   lang.String,
 	}, nil
 }
 

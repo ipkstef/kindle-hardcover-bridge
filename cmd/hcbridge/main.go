@@ -1,6 +1,7 @@
 // Command hcbridge is the Kindle → Hardcover prototype.
 //
 //	hcbridge login    sign in with a device code (shown on the Kindle screen)
+//	hcbridge identify find the current book on Hardcover (no writes)
 //	hcbridge sync     send the current book's progress once
 //	hcbridge whoami   show the signed-in user
 //	hcbridge logout   delete the saved token
@@ -23,6 +24,8 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/certs"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/config"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/match"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/mobi"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/screen"
 )
@@ -48,7 +51,7 @@ func main() {
 	scope := fs.String("scope", hardcover.DefaultScope, "OAuth scopes")
 	row := fs.Int("row", 3, "first screen row for messages")
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: hcbridge login|sync|whoami|logout [flags]")
+		fmt.Fprintln(os.Stderr, "usage: hcbridge login|identify|sync|whoami|logout [flags]")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
@@ -68,6 +71,8 @@ func main() {
 	switch cmd {
 	case "login":
 		err = a.login(ctx)
+	case "identify":
+		_, _, err = a.identify(ctx, true)
 	case "sync":
 		err = a.sync(ctx)
 	case "whoami":
@@ -135,34 +140,107 @@ func (a *app) whoami(ctx context.Context) error {
 	return nil
 }
 
-func (a *app) sync(ctx context.Context) error {
+// identify finds the current book on Hardcover with the match waterfall.
+// It returns the local book and the user's library entry (nil if the book is
+// not on the user's shelves).
+func (a *app) identify(ctx context.Context, show bool) (*book.Local, *hardcover.UserBook, error) {
 	local, err := a.db.CurrentBook(ctx)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	log.Printf("sync: local book %q by %v, %.2f%%", local.Title, local.Authors, local.Percent)
+	var meta *mobi.Meta
+	if !strings.Contains(local.MimeType, "kfx") {
+		meta, err = mobi.ReadFile(local.Path)
+		if err != nil {
+			log.Printf("identify: book file not read: %v", err)
+		}
+	}
+	id := book.BuildIdentity(*local, meta)
+	log.Printf("identify: local %q by %v, %.2f%%, year %d", local.Title, local.Authors, local.Percent, id.Year)
+	for _, x := range id.IDs {
+		log.Printf("identify: id %s %s from %s (dedicated %v)", x.Kind, x.Value, x.Source, x.Dedicated)
+	}
 
 	c := a.client()
 	me, err := c.Me(ctx)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	ubs, err := c.CurrentlyReading(ctx, me.ID)
+	lib, err := c.Library(ctx, me.ID)
+	if errors.Is(err, hardcover.ErrUnauthorized) {
+		return nil, nil, err
+	}
+	if err != nil {
+		// Not fatal: IDs and search still work without the library step.
+		log.Printf("identify: library query failed: %v", err)
+	}
+	res, steps, err := match.Resolve(ctx, c, id, lib)
+	for _, st := range steps {
+		log.Printf("identify: %s", st)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if res == nil {
+		if show {
+			a.screen.Show("Hardcover: book not found", trim(local.Title, 46), "Not sent. Details: hcbridge.log")
+		}
+		return local, nil, errNotFound
+	}
+	var ub *hardcover.UserBook
+	for i := range lib {
+		if lib[i].BookID == res.BookID {
+			ub = &lib[i]
+			break
+		}
+	}
+	shelf := "not on your shelves"
+	if ub != nil {
+		shelf = statusName(ub.StatusID)
+	}
+	log.Printf("identify: result book %d %q via %s (%s), %s", res.BookID, res.Title, res.Method, res.Via, shelf)
+	if show {
+		a.screen.Show("Hardcover: found", trim(res.Title, 46), "via "+res.Method, "Shelf: "+shelf)
+	}
+	return local, ub, nil
+}
+
+var errNotFound = errors.New("book not found on Hardcover (see log)")
+
+func statusName(id int) string {
+	switch id {
+	case hardcover.StatusWantToRead:
+		return "Want to Read"
+	case hardcover.StatusReading:
+		return "Currently Reading"
+	case hardcover.StatusRead:
+		return "Read"
+	case hardcover.StatusDNF:
+		return "Did Not Finish"
+	}
+	return fmt.Sprintf("status %d", id)
+}
+
+func (a *app) sync(ctx context.Context) error {
+	local, ub, err := a.identify(ctx, false)
+	if errors.Is(err, errNotFound) {
+		a.screen.Show("Hardcover: book not found", trim(local.Title, 46), "Not sent. Details: hcbridge.log")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	cands := make([]book.Candidate, len(ubs))
-	for i := range ubs {
-		cands[i] = book.Candidate{Title: ubs[i].Book.Title, Authors: ubs[i].Authors()}
-		log.Printf("sync: currently reading on Hardcover: %q by %v", cands[i].Title, cands[i].Authors)
-	}
-	i := book.Match(*local, cands)
-	if i < 0 {
-		a.screen.Show("Hardcover: no match (skipped)", trim(local.Title, 46),
-			"Add it to 'Currently Reading'", "on Hardcover, then try again.")
+	if ub == nil || ub.StatusID != hardcover.StatusReading {
+		// Auto-add comes after the matching is checked on the device.
+		shelf := "not on your shelves"
+		if ub != nil {
+			shelf = statusName(ub.StatusID)
+		}
+		log.Printf("sync: book is %s, not sent", shelf)
+		a.screen.Show("Hardcover: not sent", trim(local.Title, 46), "Shelf: "+shelf)
 		return nil
 	}
-	ub := &ubs[i]
+	c := a.client()
 	pages, editionID := ub.Pages()
 	if pages <= 0 {
 		return fmt.Errorf("no page count for %q on Hardcover", ub.Book.Title)
@@ -175,7 +253,7 @@ func (a *app) sync(ctx context.Context) error {
 		log.Printf("sync: already at page %d, nothing sent", page)
 	case read != nil && read.ProgressPages != nil && *read.ProgressPages > page:
 		// Forward only: paging back (maps, notes) must not lower progress.
-		// Restarting a book is handled separately (TODO, docs/open-questions.md).
+		// Restarting a book is handled separately (TODO, docs/roadmap.md).
 		log.Printf("sync: Kindle page %d < Hardcover page %d, not sent (forward only)", page, *read.ProgressPages)
 		a.screen.Show("Hardcover: not sent", trim(ub.Book.Title, 46),
 			fmt.Sprintf("Kindle p%d is behind Hardcover p%d", page, *read.ProgressPages))

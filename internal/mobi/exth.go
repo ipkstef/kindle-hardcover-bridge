@@ -1,5 +1,8 @@
-// Package mobi reads metadata (EXTH records) from MOBI / AZW / AZW3 files.
-// KFX files use a different format and are not supported.
+// Package mobi reads metadata from MOBI / AZW / AZW3 files: the MOBI header
+// full name and all EXTH records. KFX files use another format (not supported).
+//
+// Offsets: https://wiki.mobileread.com/wiki/MOBI (offsets count from the start
+// of record 0; the MOBI header starts at record 0 + 16).
 package mobi
 
 import (
@@ -7,28 +10,63 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
-// EXTH record types we use. See https://wiki.mobileread.com/wiki/MOBI#EXTH_Header
+// EXTH record types with a known meaning.
 const (
-	ExthAuthor  = 100
-	ExthISBN    = 104
-	ExthSource  = 112
-	ExthASIN    = 113
-	ExthCDEType = 501
-	ExthTitle   = 503
-	ExthASIN2   = 504 // "original" ASIN in some KF8 files
+	ExthAuthor      = 100
+	ExthPublisher   = 101
+	ExthDescription = 103
+	ExthISBN        = 104
+	ExthSubject     = 105
+	ExthPubDate     = 106
+	ExthContributor = 108
+	ExthRights      = 109
+	ExthSource      = 112
+	ExthASIN        = 113
+	ExthCDEType     = 501
+	ExthTitle       = 503
+	ExthASIN2       = 504 // original ASIN (KF8)
+	ExthLanguage    = 524
 )
 
-// Meta is the metadata we care about.
+// Meta is all text metadata found in the file.
 type Meta struct {
-	ISBN    string
-	ASIN    string
-	Title   string
-	Authors []string
-	Source  string
-	Records int // EXTH records found; 0 means no EXTH header
+	// FullName is the title from the MOBI header.
+	FullName string
+	// EXTH holds every EXTH record that is valid UTF-8 text, by type.
+	EXTH map[uint32][]string
+	// Records is the number of EXTH records (text or not). 0 = no EXTH.
+	Records int
+}
+
+// First returns the first value of an EXTH type, or "".
+func (m *Meta) First(typ uint32) string {
+	if v := m.EXTH[typ]; len(v) > 0 {
+		return v[0]
+	}
+	return ""
+}
+
+// Types returns the EXTH types present, sorted.
+func (m *Meta) Types() []uint32 {
+	out := make([]uint32, 0, len(m.EXTH))
+	for t := range m.EXTH {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// Title returns EXTH 503, else the MOBI full name.
+func (m *Meta) Title() string {
+	if t := m.First(ExthTitle); t != "" {
+		return t
+	}
+	return m.FullName
 }
 
 // ErrNotMobi means the file is not a PalmDB/MOBI file.
@@ -46,23 +84,19 @@ func ReadFile(path string) (*Meta, error) {
 
 // Read reads metadata from a MOBI stream.
 func Read(r io.ReaderAt) (*Meta, error) {
-	// PalmDB header: 78 bytes. Type/creator at 60: "BOOKMOBI".
+	// PalmDB header: 78 bytes, "BOOKMOBI" at 60, record count at 76,
+	// then the record list (8 bytes each).
 	hdr := make([]byte, 86)
 	if _, err := r.ReadAt(hdr, 0); err != nil {
 		return nil, ErrNotMobi
 	}
-	if string(hdr[60:68]) != "BOOKMOBI" {
-		return nil, ErrNotMobi
-	}
-	if binary.BigEndian.Uint16(hdr[76:78]) < 1 {
+	if string(hdr[60:68]) != "BOOKMOBI" || binary.BigEndian.Uint16(hdr[76:78]) < 1 {
 		return nil, ErrNotMobi
 	}
 	rec0 := int64(binary.BigEndian.Uint32(hdr[78:82]))
 
-	// Record 0: PalmDOC header (16 bytes), then MOBI header. The EXTH header
-	// follows the MOBI header. We look for its "EXTH" marker and do not trust
-	// the EXTH flag bit (an earlier version read the flag at a wrong offset).
-	mh := make([]byte, 24)
+	// Record 0 up to the full-name fields (offset 0x54, 0x58).
+	mh := make([]byte, 0x5C)
 	if _, err := r.ReadAt(mh, rec0); err != nil {
 		return nil, ErrNotMobi
 	}
@@ -70,7 +104,17 @@ func Read(r io.ReaderAt) (*Meta, error) {
 		return nil, ErrNotMobi
 	}
 	mobiLen := int64(binary.BigEndian.Uint32(mh[20:24]))
-	m := &Meta{}
+	m := &Meta{EXTH: map[uint32][]string{}}
+
+	if off, n := binary.BigEndian.Uint32(mh[0x54:0x58]), binary.BigEndian.Uint32(mh[0x58:0x5C]); n > 0 && n < 4096 {
+		name := make([]byte, n)
+		if _, err := r.ReadAt(name, rec0+int64(off)); err == nil && utf8.Valid(name) {
+			m.FullName = strings.TrimSpace(string(name))
+		}
+	}
+
+	// EXTH follows the MOBI header. Look for the marker; do not trust the
+	// EXTH flag bit.
 	exth := rec0 + 16 + mobiLen
 	eh := make([]byte, 12)
 	if _, err := r.ReadAt(eh, exth); err != nil || string(eh[0:4]) != "EXTH" {
@@ -92,43 +136,26 @@ func Read(r io.ReaderAt) (*Meta, error) {
 		if _, err := r.ReadAt(data, off+8); err != nil {
 			break
 		}
-		v := strings.TrimSpace(string(data))
 		m.Records++
-		switch typ {
-		case ExthISBN:
-			m.ISBN = v
-		case ExthASIN, ExthASIN2:
-			if m.ASIN == "" || typ == ExthASIN {
-				m.ASIN = v
+		if isText(data) {
+			if v := strings.TrimSpace(string(data)); v != "" {
+				m.EXTH[typ] = append(m.EXTH[typ], v)
 			}
-		case ExthTitle:
-			m.Title = v
-		case ExthAuthor:
-			m.Authors = append(m.Authors, v)
-		case ExthSource:
-			m.Source = v
 		}
 		off += n
 	}
 	return m, nil
 }
 
-// CleanISBN returns digits (and X) only, or "" if it is not a 10/13 ISBN.
-func CleanISBN(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToUpper(s) {
-		if (r >= '0' && r <= '9') || r == 'X' {
-			b.WriteRune(r)
+// isText reports if b is UTF-8 text with no control chars (other than space).
+func isText(b []byte) bool {
+	if len(b) == 0 || !utf8.Valid(b) {
+		return false
+	}
+	for _, r := range string(b) {
+		if r < 0x20 && r != '\n' && r != '\r' && r != '\t' {
+			return false
 		}
 	}
-	out := b.String()
-	if len(out) == 10 || len(out) == 13 {
-		return out
-	}
-	return ""
-}
-
-// IsASIN reports if s looks like an Amazon ASIN (B0 + 8 chars).
-func IsASIN(s string) bool {
-	return len(s) == 10 && strings.HasPrefix(s, "B0")
+	return true
 }

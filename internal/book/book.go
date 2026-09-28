@@ -16,6 +16,11 @@ type Local struct {
 	Path       string   // p_location
 	Percent    float64  // p_percentFinished, 0–100
 	LastAccess int64    // p_lastAccess, unix seconds
+	CDEType    string   // p_cdeType: EBOK, PDOC
+	MimeType   string   // p_mimeType
+	Publisher  string   // p_publisher
+	PubDate    string   // p_publicationDate (raw)
+	Language   string   // p_languages_0
 }
 
 // NormTitle makes a title comparable: lower case, no accents, no punctuation,
@@ -77,21 +82,45 @@ type Candidate struct {
 // the local title and (if both sides have authors) shares an author.
 // It returns -1 when there is no match or more than one: we never guess.
 func Match(local Local, cands []Candidate) int {
-	want := NormTitle(local.Title)
-	if want == "" {
+	m := MatchAll([]string{local.Title}, local.Authors, cands)
+	if len(m) != 1 {
 		return -1
 	}
-	found := -1
-	for i, c := range cands {
-		if NormTitle(c.Title) != want || !authorsOverlap(local.Authors, c.Authors) {
-			continue
+	return m[0]
+}
+
+// MatchAll returns the indexes of all candidates whose normalized title equals
+// one of titles and (if both sides have authors) share an author.
+func MatchAll(titles, authors []string, cands []Candidate) []int {
+	want := map[string]bool{}
+	for _, t := range titles {
+		if n := NormTitle(t); n != "" {
+			want[n] = true
 		}
-		if found >= 0 {
-			return -1
-		}
-		found = i
 	}
-	return found
+	var out []int
+	for i, c := range cands {
+		if want[NormTitle(c.Title)] && authorsOverlap(authors, c.Authors) {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// TitleClose reports if one normalized title contains the other.
+// Used as a sanity check for identifier hits.
+func TitleClose(titles []string, remote string) bool {
+	r := NormTitle(remote)
+	if r == "" {
+		return false
+	}
+	for _, t := range titles {
+		n := NormTitle(t)
+		if n != "" && (strings.Contains(n, r) || strings.Contains(r, n)) {
+			return true
+		}
+	}
+	return false
 }
 
 func authorsOverlap(a, b []string) bool {

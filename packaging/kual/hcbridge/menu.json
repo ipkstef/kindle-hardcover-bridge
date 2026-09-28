@@ -4,10 +4,31 @@
 			"name": "Hardcover",
 			"priority": 0,
 			"items": [
-				{ "name": "Sign in", "priority": 1, "action": "/bin/sh ./run.sh login" },
-				{ "name": "Sync current book now", "priority": 2, "action": "/bin/sh ./run.sh sync" },
-				{ "name": "Who am I", "priority": 3, "action": "/bin/sh ./run.sh whoami" },
-				{ "name": "Sign out", "priority": 4, "action": "/bin/sh ./run.sh logout" }
+				{
+					"name": "Sign in",
+					"priority": 1,
+					"action": "/bin/sh ./run.sh login"
+				},
+				{
+					"name": "Identify current book",
+					"priority": 2,
+					"action": "/bin/sh ./run.sh identify"
+				},
+				{
+					"name": "Sync current book now",
+					"priority": 3,
+					"action": "/bin/sh ./run.sh sync"
+				},
+				{
+					"name": "Who am I",
+					"priority": 4,
+					"action": "/bin/sh ./run.sh whoami"
+				},
+				{
+					"name": "Sign out",
+					"priority": 5,
+					"action": "/bin/sh ./run.sh logout"
+				}
 			]
 		}
 	]

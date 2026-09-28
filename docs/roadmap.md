@@ -19,15 +19,31 @@ See findings "Events test". Design:
 - `lipc-wait-event` is a Kindle tool, not curl/Python; exists on FW 5.x.
   Present on old firmware: **UNVERIFIED**. inotify needs only the kernel.
 
-## 2. Auto-add books (no manual step)
-Order, stop at the first confident hit:
-1. ASIN in EXTH (113/504) → Hardcover edition by ASIN.
-2. ISBN in EXTH (104) → Hardcover edition by ISBN.
-3. Title + author search → accept only one exact normalized match.
-4. Else: skip, show "not found" once. Never guess.
-Then `insert_user_book` with status 2 (Currently Reading) the first time the
-book gets progress. Probe item 6 ("Scan book IDs") tells how many books have
-ASIN/ISBN. KFX files: not parsed yet.
+## 2. Find the book on Hardcover (waterfall) — built, not yet run on device
+Code: `internal/book/identity.go` (collect IDs), `internal/match/resolve.go`
+(waterfall). Rule from the user: read **every** field; do not assume one tool
+(e.g. Calibre) wrote the file; go from most exact to least exact.
+
+Identifier sources (all fields, checksum-validated ISBNs, `B0` ASINs):
+- **Dedicated:** EXTH 113 / 504 (ASIN), EXTH 104 (ISBN), `cc.db p_cdeKey`
+  (ASIN for store books; old store books use an ISBN-10).
+- **Other text fields:** every other EXTH text record (source, description,
+  rights, …) and the file name. An ID from here needs a title match.
+- Titles: `cc.db` title, EXTH 503, MOBI full name. Authors: `cc.db` credits,
+  EXTH 100. Year: `cc.db` publication date, EXTH 106. Also publisher, language.
+
+Waterfall (first confident hit wins):
+1. ASIN → `editions.asin` (field **UNVERIFIED**; errors are logged, next step).
+2. ISBN-13 → `editions.isbn_13`, then ISBN-10 → `editions.isbn_10`.
+   An ID hit must point to exactly one book.
+3. User's own library (all shelves) → exact normalized title + author.
+4. Catalog search (title + first author) → one exact title + author hit, or
+   one hit with the same year.
+5. Else skip and log. Never guess.
+
+Then: book on "Currently Reading" → update progress. Other shelf / not on
+shelves → **auto-add** (next step, after `identify` is checked on device).
+KFX: no file metadata yet (cc.db fields only).
 
 ## 3. Restart a book
 The Kindle has no "restart" concept; the user just goes to the start.

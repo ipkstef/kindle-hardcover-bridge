@@ -18,7 +18,8 @@ Device-code sign-in, then one manual progress update. No daemon yet.
 | Item | Does |
 |---|---|
 | Sign in | Shows URL + code on screen. Approve on phone. Saves token to `/var/local/hcbridge/token.json` (0600). |
-| Sync current book now | Reads current book from `cc.db`, finds it in Hardcover "Currently Reading" (title + author), sets page = percent × edition pages. |
+| Identify current book | Runs the match waterfall (`docs/roadmap.md` §2). Shows the Hardcover book, the method, and your shelf. Writes nothing. |
+| Sync current book now | Reads current book from `cc.db`, finds it with the match waterfall; if it is on "Currently Reading", sets page = percent × edition pages (forward only). |
 | Who am I | Shows the signed-in user. |
 | Sign out | Deletes the token. |
 

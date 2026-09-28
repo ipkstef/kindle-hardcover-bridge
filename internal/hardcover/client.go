@@ -138,10 +138,11 @@ type Read struct {
 
 // UserBook is a book on the user's shelf.
 type UserBook struct {
-	ID      int      `json:"id"`
-	BookID  int      `json:"book_id"`
-	Edition *Edition `json:"edition"`
-	Book    struct {
+	ID       int      `json:"id"`
+	BookID   int      `json:"book_id"`
+	StatusID int      `json:"status_id"`
+	Edition  *Edition `json:"edition"`
+	Book     struct {
 		Title string `json:"title"`
 		Pages int    `json:"pages"`
 		// Shape is UNVERIFIED; parsed leniently in Authors.
@@ -151,13 +152,17 @@ type UserBook struct {
 }
 
 // Authors returns the author names of the book.
-func (ub *UserBook) Authors() []string {
+func (ub *UserBook) Authors() []string { return contributorNames(ub.Book.Contributors) }
+
+// contributorNames parses cached_contributors:
+// [{"author":{"name":"..."},"contribution":null}] (shape UNVERIFIED; lenient).
+func contributorNames(raw json.RawMessage) []string {
 	var list []struct {
 		Author struct {
 			Name string `json:"name"`
 		} `json:"author"`
 	}
-	if json.Unmarshal(ub.Book.Contributors, &list) != nil {
+	if json.Unmarshal(raw, &list) != nil {
 		return nil
 	}
 	var names []string
@@ -194,12 +199,27 @@ func (ub *UserBook) Pages() (pages int, editionID *int) {
 const userBookFields = `
 	id
 	book_id
+	status_id
 	edition { id pages }
 	book { title pages cached_contributors }
 	user_book_reads(order_by: {id: asc}) {
 		id started_at finished_at progress_pages edition_id
 		edition { id pages }
 	}`
+
+// Library returns all books on the user's shelves (any status).
+func (c *Client) Library(ctx context.Context, userID int) ([]UserBook, error) {
+	var r struct {
+		UserBooks []UserBook `json:"user_books"`
+	}
+	q := `query ($userId: Int!) {
+		user_books(where: {user_id: {_eq: $userId}}, limit: 5000) {` + userBookFields + `}
+	}`
+	if err := c.Do(ctx, q, map[string]any{"userId": userID}, &r); err != nil {
+		return nil, err
+	}
+	return r.UserBooks, nil
+}
 
 // CurrentlyReading returns the user's books with status "Currently Reading".
 func (c *Client) CurrentlyReading(ctx context.Context, userID int) ([]UserBook, error) {
@@ -264,4 +284,107 @@ func (r readResult) check() (*Read, error) {
 		return nil, errors.New("hardcover: no user_book_read in response")
 	}
 	return r.Read, nil
+}
+
+// BookHit is a catalog book.
+type BookHit struct {
+	ID           int             `json:"id"`
+	Title        string          `json:"title"`
+	ReleaseYear  *int            `json:"release_year"`
+	UsersRead    *int            `json:"users_read_count"`
+	Contributors json.RawMessage `json:"cached_contributors"`
+}
+
+// Authors returns the author names.
+func (b *BookHit) Authors() []string { return contributorNames(b.Contributors) }
+
+// EditionHit is a catalog edition with its book.
+type EditionHit struct {
+	ID     int     `json:"id"`
+	Pages  int     `json:"pages"`
+	BookID int     `json:"book_id"`
+	Book   BookHit `json:"book"`
+}
+
+// Edition ID fields we may filter on.
+var editionFields = map[string]bool{"asin": true, "isbn_13": true, "isbn_10": true}
+
+// EditionsBy returns editions where field (asin, isbn_13, isbn_10) equals value.
+func (c *Client) EditionsBy(ctx context.Context, field, value string) ([]EditionHit, error) {
+	if !editionFields[field] {
+		return nil, fmt.Errorf("hardcover: bad edition field %q", field)
+	}
+	var r struct {
+		Editions []EditionHit `json:"editions"`
+	}
+	q := `query ($v: String!) {
+		editions(where: {` + field + `: {_eq: $v}}, limit: 10) {
+			id pages book_id
+			book { id title release_year users_read_count cached_contributors }
+		}
+	}`
+	if err := c.Do(ctx, q, map[string]any{"v": value}, &r); err != nil {
+		return nil, err
+	}
+	return r.Editions, nil
+}
+
+// SearchBooks runs a catalog search and returns the matching books.
+func (c *Client) SearchBooks(ctx context.Context, query string, limit int) ([]BookHit, error) {
+	var r struct {
+		Search struct {
+			IDs []json.RawMessage `json:"ids"`
+		} `json:"search"`
+	}
+	q := `query ($q: String!, $n: Int!) {
+		search(query: $q, query_type: "Book", per_page: $n, page: 1) { ids }
+	}`
+	if err := c.Do(ctx, q, map[string]any{"q": query, "n": limit}, &r); err != nil {
+		return nil, err
+	}
+	var ids []int
+	for _, raw := range r.Search.IDs {
+		var n int
+		if json.Unmarshal(raw, &n) == nil {
+			ids = append(ids, n)
+			continue
+		}
+		var s string
+		if json.Unmarshal(raw, &s) == nil {
+			if _, err := fmt.Sscan(s, &n); err == nil {
+				ids = append(ids, n)
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var b struct {
+		Books []BookHit `json:"books"`
+	}
+	bq := `query ($ids: [Int!]) {
+		books(where: {id: {_in: $ids}}) { id title release_year users_read_count cached_contributors }
+	}`
+	if err := c.Do(ctx, bq, map[string]any{"ids": ids}, &b); err != nil {
+		return nil, err
+	}
+	// Keep search order.
+	pos := map[int]int{}
+	for i, id := range ids {
+		pos[id] = i
+	}
+	out := make([]BookHit, len(ids))
+	found := make([]bool, len(ids))
+	for _, bk := range b.Books {
+		if i, ok := pos[bk.ID]; ok {
+			out[i], found[i] = bk, true
+		}
+	}
+	res := out[:0]
+	for i := range out {
+		if found[i] {
+			res = append(res, out[i])
+		}
+	}
+	return res, nil
 }
