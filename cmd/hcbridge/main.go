@@ -1,8 +1,12 @@
-// Command hcbridge is the Kindle → Hardcover prototype.
+// Command hcbridge syncs Kindle reading progress to Hardcover.
 //
 //	hcbridge login    sign in with a device code (shown on the Kindle screen)
-//	hcbridge identify find the current book on Hardcover (no writes)
+//	hcbridge daemon   run in the background, sync on events
+//	hcbridge stop     stop the daemon
+//	hcbridge status   show daemon state on screen
 //	hcbridge sync     send the current book's progress once
+//	hcbridge identify find the current book on Hardcover (no writes)
+//	hcbridge savelog  copy the log to the USB drive
 //	hcbridge whoami   show the signed-in user
 //	hcbridge logout   delete the saved token
 package main
@@ -13,21 +17,19 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/certs"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/config"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
-	"github.com/ipkstef/kindle-hardcover-bridge/internal/match"
-	"github.com/ipkstef/kindle-hardcover-bridge/internal/mobi"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/screen"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/syncer"
 )
 
 // clientID is set at build time: -ldflags "-X main.clientID=..."
@@ -35,23 +37,25 @@ import (
 var clientID = ""
 
 type app struct {
-	oauth  *hardcover.OAuth
-	store  *config.TokenStore
-	db     *readers.Database
-	screen *screen.Screen
-	scope  string
+	oauth    *hardcover.OAuth
+	store    *config.TokenStore
+	db       *readers.Database
+	screen   *screen.Screen
+	scope    string
+	stateDir string
+	logPath  string
 }
 
 func main() {
 	fs := flag.NewFlagSet("hcbridge", flag.ExitOnError)
 	cid := fs.String("client-id", clientID, "Hardcover OAuth client ID")
-	state := fs.String("state", config.DefaultStateDir, "state directory (token)")
+	state := fs.String("state", config.DefaultStateDir, "state directory (token, daemon state)")
 	dbPath := fs.String("db", config.DefaultCCDB, "path to cc.db")
 	logPath := fs.String("log", config.DefaultLog, "log file (empty: stderr only)")
 	scope := fs.String("scope", hardcover.DefaultScope, "OAuth scopes")
 	row := fs.Int("row", 3, "first screen row for messages")
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: hcbridge login|identify|sync|whoami|logout [flags]")
+		fmt.Fprintln(os.Stderr, "usage: hcbridge login|daemon|stop|status|sync|identify|savelog|whoami|logout [flags]")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
@@ -59,10 +63,12 @@ func main() {
 
 	setupLog(*logPath)
 	a := &app{
-		store:  config.NewTokenStore(*state),
-		db:     &readers.Database{Path: *dbPath},
-		screen: screen.New(*row),
-		scope:  *scope,
+		store:    config.NewTokenStore(*state),
+		db:       &readers.Database{Path: *dbPath},
+		screen:   screen.New(*row),
+		scope:    *scope,
+		stateDir: *state,
+		logPath:  *logPath,
 	}
 	a.oauth = hardcover.NewOAuth(httpClient(), strings.TrimSpace(*cid))
 
@@ -71,10 +77,18 @@ func main() {
 	switch cmd {
 	case "login":
 		err = a.login(ctx)
+	case "daemon":
+		err = a.daemon(ctx)
+	case "stop":
+		err = a.stop()
+	case "status":
+		err = a.status()
 	case "identify":
-		_, _, _, err = a.identify(ctx, true)
+		err = a.identify(ctx)
 	case "sync":
-		err = a.sync(ctx)
+		err = a.syncNow(ctx)
+	case "savelog":
+		err = a.saveLog()
 	case "whoami":
 		err = a.whoami(ctx)
 	case "logout":
@@ -91,7 +105,9 @@ func main() {
 		if errors.Is(err, config.ErrNoToken) || errors.Is(err, hardcover.ErrUnauthorized) {
 			msg = "Not signed in. Use 'Sign in' first."
 		}
-		a.screen.Show("Hardcover: ERROR", trim(msg, 46), "Details: hcbridge.log")
+		if cmd != "daemon" { // the daemon never draws on the screen
+			a.screen.Show("Hardcover: ERROR", trim(msg, 46), "Details: Save log to USB")
+		}
 		os.Exit(1)
 	}
 }
@@ -140,195 +156,66 @@ func (a *app) whoami(ctx context.Context) error {
 	return nil
 }
 
-// identify finds the current book on Hardcover with the match waterfall.
-// It returns the local book and the user's library entry (nil if the book is
-// not on the user's shelves).
-func (a *app) identify(ctx context.Context, show bool) (*book.Local, *match.Result, *hardcover.UserBook, error) {
+func (a *app) syncer() *syncer.Syncer {
+	return &syncer.Syncer{C: a.client(), Logf: log.Printf}
+}
+
+func (a *app) identify(ctx context.Context) error {
 	local, err := a.db.CurrentBook(ctx)
 	if err != nil {
-		return nil, nil, nil, err
+		return err
 	}
-	var meta *mobi.Meta
-	if !strings.Contains(local.MimeType, "kfx") {
-		meta, err = mobi.ReadFile(local.Path)
-		if err != nil {
-			log.Printf("identify: book file not read: %v", err)
-		}
-	}
-	id := book.BuildIdentity(*local, meta)
-	log.Printf("identify: local %q by %v, %.2f%%, year %d", local.Title, local.Authors, local.Percent, id.Year)
-	for _, x := range id.IDs {
-		log.Printf("identify: id %s %s from %s (dedicated %v)", x.Kind, x.Value, x.Source, x.Dedicated)
-	}
-
-	c := a.client()
-	me, err := c.Me(ctx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	lib, err := c.Library(ctx, me.ID)
-	if errors.Is(err, hardcover.ErrUnauthorized) {
-		return nil, nil, nil, err
-	}
-	if err != nil {
-		// Not fatal: IDs and search still work without the library step.
-		log.Printf("identify: library query failed: %v", err)
-	}
-	res, steps, err := match.Resolve(ctx, c, id, lib)
-	for _, st := range steps {
-		log.Printf("identify: %s", st)
-	}
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if res == nil {
-		if show {
-			a.screen.Show("Hardcover: book not found", trim(local.Title, 46), "Not sent. Details: hcbridge.log")
-		}
-		return local, nil, nil, errNotFound
-	}
-	var ub *hardcover.UserBook
-	for i := range lib {
-		if lib[i].BookID == res.BookID {
-			ub = &lib[i]
-			break
-		}
-	}
-	shelf := "not on your shelves"
-	if ub != nil {
-		shelf = statusName(ub.StatusID)
-	}
-	log.Printf("identify: result book %d %q via %s (%s), %s", res.BookID, res.Title, res.Method, res.Via, shelf)
-	if show {
-		a.screen.Show("Hardcover: found", trim(res.Title, 46), "via "+res.Method, "Shelf: "+shelf)
-	}
-	return local, res, ub, nil
-}
-
-var errNotFound = errors.New("book not found on Hardcover (see log)")
-
-func statusName(id int) string {
-	switch id {
-	case hardcover.StatusWantToRead:
-		return "Want to Read"
-	case hardcover.StatusReading:
-		return "Currently Reading"
-	case hardcover.StatusRead:
-		return "Read"
-	case hardcover.StatusDNF:
-		return "Did Not Finish"
-	}
-	return fmt.Sprintf("status %d", id)
-}
-
-// finishedPercent: at or above this, the book counts as finished.
-// Finishing (status Read) is not built yet, so such books are not sent.
-const finishedPercent = 99.0
-
-func (a *app) sync(ctx context.Context) error {
-	local, res, ub, err := a.identify(ctx, false)
-	if errors.Is(err, errNotFound) {
-		a.screen.Show("Hardcover: book not found", trim(local.Title, 46), "Not sent. Details: hcbridge.log")
+	res, ub, err := a.syncer().Identify(ctx, local)
+	if errors.Is(err, syncer.ErrNotFound) {
+		a.screen.Show("Hardcover: book not found", trim(local.Title, 46), "Details: Save log to USB")
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	notSent := func(why string) error {
-		log.Printf("sync: not sent: %s", why)
-		a.screen.Show("Hardcover: not sent", trim(res.Title, 46), trim(why, 46))
-		return nil
+	shelf := "not on your shelves"
+	if ub != nil {
+		shelf = syncer.StatusName(ub.StatusID)
 	}
-	if local.Percent <= 0 {
-		return notSent("book not started on the Kindle")
-	}
-	if local.Percent >= finishedPercent {
-		return notSent("finished book: not built yet")
-	}
+	a.screen.Show("Hardcover: found", trim(res.Title, 46), "via "+res.Method, "Shelf: "+shelf)
+	return nil
+}
 
-	c := a.client()
-	switch {
-	case ub == nil:
-		// Auto-add to Currently Reading. Prefer the edition the ID pointed
-		// to (same ebook), else the book's default ebook/physical edition.
-		editionID := res.EditionID
-		if editionID == nil || res.Pages <= 0 {
-			if de, err := c.DefaultEdition(ctx, res.BookID); err != nil {
-				log.Printf("sync: default edition: %v", err)
-			} else if de != nil {
-				editionID = &de.ID
-			}
-		}
-		me, err := c.Me(ctx)
-		if err != nil {
-			return err
-		}
-		privacy := 1 // public, as the Hardcover KOReader plugin does
-		if me.PrivacyID != nil {
-			privacy = *me.PrivacyID
-		}
-		nub, err := c.InsertUserBook(ctx, res.BookID, hardcover.StatusReading, editionID, privacy)
-		if err != nil {
-			return err
-		}
-		log.Printf("sync: auto-added book %d to Currently Reading (user_book %d)", res.BookID, nub.ID)
-		ub = nub
-	case ub.StatusID == hardcover.StatusWantToRead:
-		nub, err := c.SetStatus(ctx, ub.ID, hardcover.StatusReading)
-		if err != nil {
-			return err
-		}
-		log.Printf("sync: moved user_book %d from Want to Read to Currently Reading", ub.ID)
-		ub = nub
-	case ub.StatusID != hardcover.StatusReading:
-		return notSent("shelf is " + statusName(ub.StatusID) + " (re-read: not built yet)")
+func (a *app) syncNow(ctx context.Context) error {
+	local, err := a.db.CurrentBook(ctx)
+	if err != nil {
+		return err
 	}
-	// Re-read the entry: Hardcover may create a read by itself on status
-	// change (UNVERIFIED), and we must not add a second one.
-	if fresh, err := c.UserBookByID(ctx, ub.ID); err != nil {
-		log.Printf("sync: re-read user_book %d: %v", ub.ID, err)
-	} else {
-		ub = fresh
+	out, err := a.syncer().Sync(ctx, local)
+	if err != nil {
+		return err
 	}
-
-	pages, editionID := ub.Pages()
-	if pages <= 0 && res.Pages > 0 {
-		pages, editionID = res.Pages, res.EditionID
-	}
-	if pages <= 0 {
-		return fmt.Errorf("no page count for %q on Hardcover", ub.Book.Title)
-	}
-	page := book.PercentToPage(local.Percent, pages)
-
-	read := ub.CurrentRead()
-	switch {
-	case read != nil && read.ProgressPages != nil && *read.ProgressPages == page:
-		log.Printf("sync: already at page %d, nothing sent", page)
-	case read != nil && read.ProgressPages != nil && *read.ProgressPages > page:
-		// Forward only: paging back (maps, notes) must not lower progress.
-		// Restarting a book is handled separately (TODO, docs/roadmap.md).
-		log.Printf("sync: Kindle page %d < Hardcover page %d, not sent (forward only)", page, *read.ProgressPages)
-		a.screen.Show("Hardcover: not sent", trim(ub.Book.Title, 46),
-			fmt.Sprintf("Kindle p%d is behind Hardcover p%d", page, *read.ProgressPages))
-		return nil
-	case read != nil:
-		if read.EditionID != nil {
-			editionID = read.EditionID
-		}
-		if _, err := c.UpdateReadProgress(ctx, read.ID, page, editionID, read.StartedAt); err != nil {
-			return err
-		}
-		log.Printf("sync: updated read %d to page %d/%d", read.ID, page, pages)
+	switch out.Kind {
+	case syncer.Skipped:
+		a.screen.Show("Hardcover: not sent", trim(out.Title, 46), trim(out.Reason, 46))
 	default:
-		today := time.Now().Format("2006-01-02")
-		r, err := c.InsertRead(ctx, ub.ID, page, editionID, today)
-		if err != nil {
-			return err
+		lines := []string{"Hardcover: synced", trim(out.Title, 46),
+			fmt.Sprintf("Page %d of %d (%.0f%%)", out.Page, out.Pages, local.Percent)}
+		if out.Added != "" {
+			lines = append(lines, out.Added)
 		}
-		log.Printf("sync: new read %d at page %d/%d", r.ID, page, pages)
+		a.screen.Show(lines...)
 	}
-	a.screen.Show("Hardcover: synced", trim(ub.Book.Title, 46),
-		fmt.Sprintf("Page %d of %d (%.0f%%)", page, pages, local.Percent))
+	return nil
+}
+
+// saveLog copies the log (and the rotated part) to the USB drive.
+func (a *app) saveLog() error {
+	var buf []byte
+	for _, p := range []string{a.logPath + ".1", a.logPath} {
+		if b, err := os.ReadFile(p); err == nil {
+			buf = append(buf, b...)
+		}
+	}
+	if err := os.WriteFile(config.USBLog, buf, 0o644); err != nil {
+		return err
+	}
+	a.screen.Show("Log saved: "+filepath.Base(config.USBLog), "Connect USB to copy it.")
 	return nil
 }
 
@@ -370,18 +257,6 @@ func httpClient() *http.Client {
 			TLSClientConfig: &tls.Config{RootCAs: certs.Pool()},
 		},
 	}
-}
-
-func setupLog(path string) {
-	log.SetFlags(log.LstdFlags | log.LUTC)
-	if path == "" {
-		return
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return // /mnt/us may be unmounted (USB); log to stderr only
-	}
-	log.SetOutput(io.MultiWriter(os.Stderr, f))
 }
 
 func trim(s string, n int) string {

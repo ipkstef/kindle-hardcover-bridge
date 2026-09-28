@@ -66,7 +66,10 @@ restart/finish, install without KUAL). Events test done: appmgrd
 `appPaused` reader + inotify on cc.db + Wi-Fi events all work (roadmap §1).
 Book matching is now a waterfall over all fields (ASIN → ISBN → library →
 search → skip), roadmap §2; **works on device** (ISBN and library steps).
-Auto-add built in `hcbridge sync`; waiting for a device test. Then: daemon.
+Auto-add **works on device** (Red Rising: added via ISBN, page set).
+Daemon core is **work in progress** (`hcbridge daemon`, `internal/daemon`,
+`internal/events`, `internal/syncer`): built and unit-tested, not run on the
+device. The user wants to **discuss system design before it is locked in**.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

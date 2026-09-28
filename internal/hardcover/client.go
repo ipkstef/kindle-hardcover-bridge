@@ -392,18 +392,19 @@ func (c *Client) SearchBooks(ctx context.Context, query string, limit int) ([]Bo
 }
 
 // UserBookByID returns one shelf entry with its reads.
+// (user_books_by_pk returned null on the live API, so we filter by id.)
 func (c *Client) UserBookByID(ctx context.Context, id int) (*UserBook, error) {
 	var r struct {
-		UB *UserBook `json:"user_books_by_pk"`
+		UBs []UserBook `json:"user_books"`
 	}
-	q := `query ($id: Int!) { user_books_by_pk(id: $id) {` + userBookFields + `} }`
+	q := `query ($id: Int!) { user_books(where: {id: {_eq: $id}}, limit: 1) {` + userBookFields + `} }`
 	if err := c.Do(ctx, q, map[string]any{"id": id}, &r); err != nil {
 		return nil, err
 	}
-	if r.UB == nil {
+	if len(r.UBs) == 0 {
 		return nil, fmt.Errorf("hardcover: user_book %d not found", id)
 	}
-	return r.UB, nil
+	return &r.UBs[0], nil
 }
 
 type userBookResult struct {

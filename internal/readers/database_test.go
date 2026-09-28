@@ -40,4 +40,17 @@ func TestCurrentBook(t *testing.T) {
 		b.Publisher != "Penguin Group" || b.Language != "en" || b.CDEType != "EBOK" {
 		t.Fatalf("got %+v", b)
 	}
+
+	all, err := (&Database{Path: path}).AllProgress(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// KUAL script, never-opened book and collection are left out.
+	if len(all) != 2 || all["f163"].Percent != 10.723627 || all["7f13"].Percent != 3.5 {
+		t.Fatalf("AllProgress = %+v", all)
+	}
+	b, err = (&Database{Path: path}).BookByKey(context.Background(), "7f13")
+	if err != nil || b.Title != "Old Book" {
+		t.Fatalf("BookByKey = %+v %v", b, err)
+	}
 }

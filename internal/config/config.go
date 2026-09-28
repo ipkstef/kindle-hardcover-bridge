@@ -14,10 +14,14 @@ import (
 //
 // State lives in /var/local, not /mnt/us: /mnt/us is FAT (no file modes) and
 // is unmounted while USB is connected.
+//
+// The log also lives in /var/local: a daemon must not keep writing to
+// /mnt/us, which disappears in USB mode. "Save log to USB" copies it.
 const (
 	DefaultStateDir = "/var/local/hcbridge"
 	DefaultCCDB     = "/var/local/cc.db"
-	DefaultLog      = "/mnt/us/hcbridge.log"
+	DefaultLog      = "/var/local/hcbridge/hcbridge.log"
+	USBLog          = "/mnt/us/hcbridge.log"
 )
 
 // TokenStore saves the OAuth token as JSON with mode 0600.
