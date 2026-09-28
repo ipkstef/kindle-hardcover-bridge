@@ -1,6 +1,8 @@
-// Command probe is a one-shot test for a real Kindle.
-// It checks that a static Go binary starts on this kernel and that it can
-// reach the Hardcover API over HTTPS with the bundled CA roots.
+// Command probe is a set of one-shot tests for a real Kindle.
+//
+//	probe [url]          HTTPS test: can a static Go binary reach Hardcover?
+//	probe events [flags] log file and LIPC events (what can trigger a sync?)
+//	probe ids [flags]    list ISBN / ASIN found inside the book files
 package main
 
 import (
@@ -19,6 +21,18 @@ import (
 const metadataURL = "https://api.hardcover.app/.well-known/oauth-authorization-server"
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "events":
+			os.Exit(events(os.Args[2:]))
+		case "ids":
+			os.Exit(ids(os.Args[2:]))
+		}
+	}
+	httpsTest()
+}
+
+func httpsTest() {
 	fmt.Printf("go: %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
 	fmt.Printf("time: %s\n", time.Now().UTC().Format(time.RFC3339))
 

@@ -58,7 +58,11 @@ Option B prototype built (`cmd/hcbridge`, KUAL menu "Hardcover", see
 `docs/prototype.md`): device-code sign-in + one manual sync. It only syncs a book
 that is already in the user's Hardcover "Currently Reading" list and matches by
 title + author (never guesses). **Works on the user's Kindle** (sign-in +
-progress update confirmed). Open: progress can go backwards (see findings).
+progress update confirmed). Sync is **forward only** (user decision).
+
+User goals and plan: `docs/roadmap.md` (event triggers, auto-add books,
+restart/finish, install without KUAL). Probe items 5 (events) and 6 (book IDs)
+built; waiting for the user's results.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.
@@ -72,6 +76,7 @@ Go version still open (needs an old-kernel device); builds use Go 1.23.
 - `docs/probe.md` — device probe: what it checks, how to run it
 - `docs/findings-bellatrix-5.17.1.md` — results from the user's Kindle
 - `docs/prototype.md` — hcbridge prototype: setup and test steps
+- `docs/roadmap.md` — user goals and plan to the end product
 
 ## Working rules for Claude
 - Mark anything not verified on a real device or in real docs as **UNVERIFIED**.

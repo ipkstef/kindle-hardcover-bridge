@@ -173,6 +173,13 @@ func (a *app) sync(ctx context.Context) error {
 	switch {
 	case read != nil && read.ProgressPages != nil && *read.ProgressPages == page:
 		log.Printf("sync: already at page %d, nothing sent", page)
+	case read != nil && read.ProgressPages != nil && *read.ProgressPages > page:
+		// Forward only: paging back (maps, notes) must not lower progress.
+		// Restarting a book is handled separately (TODO, docs/open-questions.md).
+		log.Printf("sync: Kindle page %d < Hardcover page %d, not sent (forward only)", page, *read.ProgressPages)
+		a.screen.Show("Hardcover: not sent", trim(ub.Book.Title, 46),
+			fmt.Sprintf("Kindle p%d is behind Hardcover p%d", page, *read.ProgressPages))
+		return nil
 	case read != nil:
 		if read.EditionID != nil {
 			editionID = read.EditionID

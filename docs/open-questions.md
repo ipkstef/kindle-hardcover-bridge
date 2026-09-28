@@ -10,6 +10,8 @@
       test device are sideloaded (Calibre UUID in `p_cdeKey`). Try EXTH header.
 - [ ] Oldest Kindle model/firmware we will support? (Define the floor.)
 - [ ] Daemon autostart method that survives reboot and firmware updates.
+      Idea: library `.sh` scriptlet + upstart job. See `docs/roadmap.md` §5.
+- [ ] Event triggers instead of polling (inotify, LIPC). See `docs/roadmap.md` §1.
 - [ ] Battery/Wi-Fi: send only when Wi-Fi is already up? Queue offline updates?
 
 ## Hardcover side
@@ -18,8 +20,9 @@
       If no confident match: skip, do not guess.
 - [ ] Write scopes needed.
 - [ ] Rate limits.
-- [ ] Start a new read vs update current read (re-reads).
-- [ ] Mark finished at 100%?
+- [ ] Start a new read vs update current read (re-reads). See `docs/roadmap.md` §3.
+- [ ] Mark finished at 100%? See `docs/roadmap.md` §4.
+- [x] Progress going backwards → forward only (user decision).
 
 ## Runtime risks
 - Old firmware: old TLS, no Python. Decision: static Go ARM binary

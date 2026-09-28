@@ -43,5 +43,17 @@ User steps:
 6. Wait until 10 min are done (or KUAL → "4. Stop watch").
 7. Connect USB. Send `hcprobe-watch.txt`.
 
+## Events (menu item 5)
+Runs 15 min in the background. Logs to `/mnt/us/hcprobe-events.txt`:
+- every LIPC event from powerd, appmgrd, wifid, cmd, readingstreams,
+  booklet.reader (`lipc-wait-event -m <pub> '*'`);
+- inotify events on `/var/local/cc.db*`, then the current book's percent.
+Stop early: item 4.
+
+## Book IDs (menu item 6)
+Writes `/mnt/us/hcprobe-ids.txt`: per book, key (8 chars), type, file type,
+ISBN (EXTH 104), ASIN (EXTH 113/504), read state, percent. No titles. KFX is
+not parsed.
+
 Status: the report (item 1) ran OK on one Kindle (FW 5.17.1). The watch
 (items 3–4) is **UNVERIFIED** on a device.
