@@ -173,6 +173,11 @@ func (a *app) daemon(ctx context.Context) error {
 	scan := func(why string) {
 		sctx, scancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer scancel()
+		// One line per trigger, so a device log shows which events came
+		// (a scan with no change logs nothing else).
+		if why != "poll" {
+			log.Printf("daemon: scan (%s)", why)
+		}
 		if err := d.Scan(sctx); err != nil && ctx.Err() == nil {
 			log.Printf("daemon: scan (%s): %v", why, err)
 		}
