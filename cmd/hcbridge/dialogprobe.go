@@ -41,6 +41,10 @@ func (a *app) dialogProbe(ctx context.Context) error {
 	section := func(title, out string) { w("== %s ==\n%s", title, strings.TrimRight(out, "\n")) }
 	section("lipc-probe -l (goodreads, kpp, dialog)", grepLines(runOut(ctx, 30*time.Second, "lipc-probe", "-l"),
 		"goodreads", "kpp", "dialog", "pillow", "winmgr", "endaction", "booklet"))
+	// Pillow dialogs are HTML/JS files; customDialog takes one of their names
+	// (UNVERIFIED). Needed to show our own box (e.g. a half-star picker).
+	section("pillow dialog files", runOut(ctx, 30*time.Second, "find", "/usr/share", "/usr/lib", "/opt",
+		"-maxdepth", "6", "-path", "*pillow*", "(", "-name", "*.html", "-o", "-name", "*.js", "-o", "-name", "*.json", ")"))
 	dump := func(why string) {
 		for _, svc := range []string{"com.lab126.winmgr", "com.lab126.pillow"} {
 			section(why+": lipc-probe -v "+svc, runOut(ctx, 15*time.Second, "lipc-probe", "-v", svc))
