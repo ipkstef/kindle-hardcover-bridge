@@ -302,3 +302,19 @@ tap (read-only research).
 - Stop, then Start: clean (no hang).
 - Not tested yet: offline (Wi-Fi off → go Home → Wi-Fi on), shelf
   forward-only (`to-read` on a Read book).
+
+## Offline test, versions b991c98 / b3ec80f (2026-09-28, 07:10–07:21 UTC)
+- Wi-Fi off, go Home: `waiting (temporary failure: … network is
+  unreachable), will retry` — no attempt counted, book kept (The Rithmatist,
+  Darth Bane: Path of Destruction). Each DB commit re-tries (fails at once).
+- Wi-Fi back: the next `db commit` scan sent it (auto-add + page) **before**
+  `connectionAvailable` came (`scan (network up)` 8 s later, nothing left).
+- Shelf `to-read` (`InvokedByMenu`) on a Read book: `Read → Want to Read not
+  sent (forward only)`.
+- The Rithmatist got read state 2 at 5.26 % (07:14) → finished as Read (rule:
+  read state 2 = Kindle marked read). UNVERIFIED: the user's action (Mark as
+  Read in the menu?).
+- Darth Bane: Kindle title "Path of Destruction: Star Wars Legends (Darth
+  Bane): A Novel of the Old Republic" → Hardcover "Darth Bane: Path of
+  Destruction" via ISBN (dedicated field, title differs).
+- Scan trigger lines work: `start`, `db commit`, `left book`, `network up`.
