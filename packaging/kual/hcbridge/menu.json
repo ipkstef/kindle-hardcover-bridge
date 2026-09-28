@@ -50,7 +50,7 @@
 					"action": "/bin/sh ./run.sh savelog"
 				},
 				{
-					"name": "Dialog probe (research, 3 min)",
+					"name": "Dialog probe (research, 2 min)",
 					"priority": 12,
 					"action": "/bin/sh ./run.sh dialogprobe"
 				},

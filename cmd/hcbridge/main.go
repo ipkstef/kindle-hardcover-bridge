@@ -9,7 +9,7 @@
 //	hcbridge clips    send new highlights/notes (private journal entries)
 //	hcbridge clipsall send all highlights/notes, also old ones
 //	hcbridge savelog  copy the log to the USB drive
-//	hcbridge dialogprobe record the "Rating Error" dialog (research, 3 min)
+//	hcbridge dialogprobe collect dialog files and test pillow boxes (research)
 //	hcbridge whoami   show the signed-in user
 //	hcbridge logout   delete the saved token
 package main

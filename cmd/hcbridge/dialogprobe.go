@@ -3,121 +3,147 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
-	"strconv"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/events"
 )
 
 const (
 	dialogProbeOut = "/mnt/us/hcbridge-dialogprobe.txt"
-	dialogProbeFor = 3 * time.Minute
+	probeFilesDir  = "/mnt/us/hcbridge-probe-files"
+	// probeTestWait: time for the user to tap a button on each test box.
+	probeTestWait = 20 * time.Second
 )
 
-// dialogProbe records the window manager while the user taps stars in the
-// end-of-book dialog, to find a way to close the "Rating Error" dialog
-// (roadmap "Later", option B + C). It only reads: LIPC properties, the
-// system log and system files. (The winmgr list requests getAllWindows and
-// visibleWindows were removed: they only threw Lua errors, probe 2026-09-28.)
+// dialogProbe (#3, final) collects all that is needed to show our own
+// message after a star tap (option C) and maybe a half-star picker:
+//   - copies of pillow's dialog files and the window manager's Lua scripts;
+//   - all pillow / winmgr LIPC events during the run (what a button tap
+//     sends back);
+//   - firmware, screen size, ASR and eat-tap modes;
+//   - three live tests that try to open a pillow box (the user taps any
+//     button). Formats are guesses (UNVERIFIED); a wrong one is ignored.
+//
+// Earlier probes (findings, 2026-09-28): the error box is a cvm
+// ConfirmationDialog; winmgr fakeTap / fakeKeyEvent only work in ASR or
+// eat-tap mode.
 func (a *app) dialogProbe(ctx context.Context) error {
 	f, err := os.Create(dialogProbeOut)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	var mu sync.Mutex
 	w := func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
 		fmt.Fprintf(f, time.Now().Format("15:04:05.000")+" "+format+"\n", args...)
 		f.Sync()
 	}
-	a.screen.Show("Dialog probe: running 3 min.",
-		"Go to the end of a book now,",
-		"tap stars, wait for the error,",
-		"then close it. Result file:",
-		"  hcbridge-dialogprobe.txt")
-	w("dialog probe, version %s", version)
-
 	section := func(title, out string) { w("== %s ==\n%s", title, strings.TrimRight(out, "\n")) }
-	section("lipc-probe -l (goodreads, kpp, dialog)", grepLines(runOut(ctx, 30*time.Second, "lipc-probe", "-l"),
-		"goodreads", "kpp", "dialog", "pillow", "winmgr", "endaction", "booklet"))
-	// Probe #2 found pillow's dialog files and that fakeTap / fakeKeyEvent
-	// work only in ASR (screen reader) or eat-tap mode. Probe #3 copies the
-	// files that define the message and dialog formats, to read them.
-	w("copied files: %s", copyProbeFiles())
-	dump := func(why string) {
-		time.Sleep(300 * time.Millisecond) // let syslog catch up
-		section(why+": dialog lines in /var/log/messages", grepLines(tailFile("/var/log/messages", 400),
-			"kdialog", "kindleframefactory", "ratingcontroller", "goodreads"))
-	}
-	dump("start")
+	a.screen.Show("Dialog probe: about 2 min.",
+		"Boxes may appear on the screen.",
+		"Tap any button on each box.",
+		"Do not use the Kindle otherwise.",
+		"Wait for 'Dialog probe: done'.")
+	w("dialog probe #3, version %s", version)
 
-	end := time.Now().Add(dialogProbeFor)
-	last, lastN, dumps := "", 0, 0
-	for time.Now().Before(end) && ctx.Err() == nil {
-		ns := lipcGet(ctx, "com.lab126.winmgr", "activeDialogCount")
-		title := lipcGet(ctx, "com.lab126.winmgr", "getActiveAppTitle")
-		if cur := ns + " | " + title; cur != last {
-			w("dialogs %s", cur)
-			last = cur
+	// 1. Files.
+	w("copied: %s", copyTree("/usr/share/webkit-1.0/pillow", "pillow", "locales"))
+	w("copied: %s", copyTree("/etc/xdg/awesome", "awesome", ""))
+	w("copied: %s", copyTree("/opt/var/local/mesquite/shared/javascripts", "mesquite-js", ""))
+
+	// 2. Events (background, until the end of the probe).
+	pctx, stop := context.WithCancel(ctx)
+	defer stop()
+	for _, svc := range []string{"com.lab126.pillow", "com.lab126.winmgr"} {
+		svc := svc
+		if err := events.LIPC(pctx, svc, func(l string) { w("event %s: %s", svc, l) }, w); err != nil {
+			w("events %s: %v", svc, err)
 		}
-		// A second dialog on top of the end-of-book dialog: the error
-		// (device log 2026-09-28). Dump at most 3 times.
-		n, _ := strconv.Atoi(ns)
-		if n >= 2 && n != lastN && dumps < 3 {
-			dumps++
-			dump(fmt.Sprintf("dialog count %d (#%d)", n, dumps))
-		}
-		lastN = n
-		time.Sleep(300 * time.Millisecond)
 	}
-	dump("end")
+
+	// 3. Device info.
+	section("firmware", tailFile("/etc/prettyversion.txt", 5))
+	section("eips -i (screen)", runOut(ctx, 10*time.Second, "eips", "-i"))
+	for _, p := range []string{"ASRMode", "eatTapMode", "activeDialogCount", "getActiveAppTitle"} {
+		w("winmgr %s = %s", p, lipcGet(ctx, "com.lab126.winmgr", p))
+	}
+
+	// 4. Live tests. Each: set the property, wait for a tap, record.
+	tests := []struct{ prop, value string }{
+		{"pillowAlert", `{"clientParams":{"alertId":"hcbridgeTest","show":true,` +
+			`"customStrings":[{"matchStr":"alertTitle","replaceStr":"Hardcover test"},` +
+			`{"matchStr":"alertText","replaceStr":"Saved to Hardcover (test). Tap OK."}]}}`},
+		{"customDialog", `{"name":"sample_custom_dialog","clientParams":{}}`},
+		{"customDialog", `{"name":"simple_alert","clientParams":{"alertId":"hcbridgeTest",` +
+			`"title":"Hardcover test","text":"Saved to Hardcover (test). Tap OK."}}`},
+	}
+	for i, t := range tests {
+		w("test %d: lipc-set-prop com.lab126.pillow %s %s", i+1, t.prop, t.value)
+		w("test %d result: %s", i+1, strings.TrimSpace(runOut(ctx, 10*time.Second,
+			"lipc-set-prop", "com.lab126.pillow", t.prop, t.value)))
+		for s := 0; s < int(probeTestWait/time.Second) && ctx.Err() == nil; s += 2 {
+			time.Sleep(2 * time.Second)
+			w("test %d: dialogs %s | %s", i+1, lipcGet(ctx, "com.lab126.winmgr", "activeDialogCount"),
+				lipcGet(ctx, "com.lab126.winmgr", "getActiveAppTitle"))
+		}
+	}
+
+	time.Sleep(time.Second) // let syslog catch up
+	section("system log: pillow, dialogs, winmgr", grepLines(tailFile("/var/log/messages", 1500),
+		"pillow", "kdialog", "kindleframefactory", "winmgr", "alert", "customdialog"))
+	stop()
 	w("done")
-	a.screen.Show("Dialog probe: done.", "Connect USB and send", "  hcbridge-dialogprobe.txt",
-		"  + folder hcbridge-probe-files")
+	a.screen.Show("Dialog probe: done.", "Connect USB and send:", "  hcbridge-dialogprobe.txt",
+		"  folder hcbridge-probe-files")
 	return nil
 }
 
-const probeFilesDir = "/mnt/us/hcbridge-probe-files"
-
-// probeFiles define pillow's alert / custom dialog formats and the window
-// manager's fake input rules (paths seen in probe #2).
-var probeFiles = []string{
-	"/usr/share/webkit-1.0/pillow/simple_alert.html",
-	"/usr/share/webkit-1.0/pillow/sample_custom_dialog.html",
-	"/usr/share/webkit-1.0/pillow/javascripts/simple_alert.js",
-	"/usr/share/webkit-1.0/pillow/javascripts/simple_alert_config.js",
-	"/usr/share/webkit-1.0/pillow/javascripts/sample_custom_dialog.js",
-	"/usr/share/webkit-1.0/pillow/javascripts/client_params_handler.js",
-	"/usr/share/webkit-1.0/pillow/javascripts/pillow.js",
-	"/usr/share/webkit-1.0/pillow/javascripts/pillow_case.js",
-	"/usr/share/webkit-1.0/pillow/javascripts/lipc_event_handler.js",
-	"/usr/share/webkit-1.0/pillow/javascripts/widget_button_bar.js",
-	"/usr/share/webkit-1.0/pillow/javascripts/constants.js",
-	"/usr/share/webkit-1.0/pillow/strings/simple_alert_strings.js",
-	"/usr/share/webkit-1.0/pillow/strings/sample_custom_dialog_strings.js",
-	"/etc/xdg/awesome/lab126_eat_tap_mode.lua",
-	"/etc/xdg/awesome/lab126_asr.lua",
-}
-
-// copyProbeFiles copies probeFiles (read-only on the source) to the USB
-// folder and returns a short result.
-func copyProbeFiles() string {
-	if err := os.MkdirAll(probeFilesDir, 0o755); err != nil {
-		return err.Error()
-	}
-	ok, errs := 0, []string{}
-	for _, p := range probeFiles {
-		b, err := os.ReadFile(p)
-		if err == nil {
-			err = os.WriteFile(probeFilesDir+"/"+strings.ReplaceAll(strings.TrimPrefix(p, "/"), "/", "_"), b, 0o644)
-		}
+// copyTree copies the regular files under src to probeFilesDir/name,
+// skipping a folder named skip. Read-only on the source.
+func copyTree(src, name, skip string) string {
+	dst := filepath.Join(probeFilesDir, name)
+	n, size, errs := 0, int64(0), 0
+	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			errs = append(errs, err.Error())
-			continue
+			errs++
+			return nil
 		}
-		ok++
+		if d.IsDir() {
+			if skip != "" && d.Name() == skip {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || size > 20<<20 { // cap: 20 MB in all
+			return nil
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			errs++
+			return nil
+		}
+		rel, _ := filepath.Rel(src, p)
+		out := filepath.Join(dst, rel)
+		if os.MkdirAll(filepath.Dir(out), 0o755) != nil || os.WriteFile(out, b, 0o644) != nil {
+			errs++
+			return nil
+		}
+		n++
+		size += int64(len(b))
+		return nil
+	})
+	if err != nil {
+		return fmt.Sprintf("%s: %v", src, err)
 	}
-	return fmt.Sprintf("%d of %d to %s %v", ok, len(probeFiles), probeFilesDir, errs)
+	return fmt.Sprintf("%s → %s: %d files, %d KB, %d errors", src, dst, n, size>>10, errs)
 }
 
 func runOut(ctx context.Context, d time.Duration, name string, args ...string) string {
