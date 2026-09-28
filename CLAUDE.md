@@ -103,8 +103,9 @@ offline ≠ not found, no retry limit while offline, token refresh lock,
 subtitle-safe title match, forward-only shelf, zone-free clip IDs, one
 writer goroutine, fsync writes). b991c98 **works on device** (rating,
 re-read via shelf, stop/start, offline → retry when Wi-Fi is back,
-forward-only shelf).
-Open: autostart/no-KUAL install.
+forward-only shelf). First release = default logic only: shelf choice →
+status sync **off** (`syncShelves`), telemetry and SQLite DB later
+(roadmap "Later"). Open: autostart/no-KUAL install.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

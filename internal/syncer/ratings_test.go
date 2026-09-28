@@ -59,7 +59,7 @@ func TestRateSyncSurvivesFlushAndOffline(t *testing.T) {
 
 // shelfRun sends one shelf record for a book whose Hardcover status is have.
 // It returns the status written, or nil if none.
-func shelfRun(t *testing.T, shelf string, have int) any {
+func shelfRun(t *testing.T, shelf string, have int, on bool) any {
 	dir := t.TempDir()
 	fm := filepath.Join(dir, "fmcache.db")
 	db, _ := sql.Open("sqlite", fm)
@@ -69,9 +69,9 @@ func shelfRun(t *testing.T, shelf string, have int) any {
 	db.Close()
 	f := newFake(have)
 	rs := &RateSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
-		Path: fm, StatePath: filepath.Join(dir, "ratings.json")}
+		Path: fm, StatePath: filepath.Join(dir, "ratings.json"), SyncShelves: on}
 	n, err := rs.Run(context.Background())
-	if err != nil || n != 1 {
+	if want := map[bool]int{true: 1, false: 0}[on]; err != nil || n != want {
 		t.Fatalf("got %d %v", n, err)
 	}
 	var status any
@@ -85,12 +85,16 @@ func shelfRun(t *testing.T, shelf string, have int) any {
 
 func TestShelfChoiceSent(t *testing.T) {
 	// Want to Read → Currently Reading: forward, sent.
-	if got := shelfRun(t, "currently-reading", 1); got != float64(2) {
+	if got := shelfRun(t, "currently-reading", 1, true); got != float64(2) {
 		t.Fatalf("want→reading: status %v", got)
 	}
 	// Currently Reading → Want to Read: backward, not sent.
-	if got := shelfRun(t, "to-read", 2); got != nil {
+	if got := shelfRun(t, "to-read", 2, true); got != nil {
 		t.Fatalf("reading→want sent: %v", got)
+	}
+	// Shelf sync off (first release): nothing sent.
+	if got := shelfRun(t, "currently-reading", 1, false); got != nil {
+		t.Fatalf("sync off, but status %v sent", got)
 	}
 }
 
@@ -135,7 +139,7 @@ func TestShelfReadingOnReadBookIsReread(t *testing.T) {
 	var cleared string
 	rs := &RateSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
 		Path: fm, StatePath: filepath.Join(dir, "ratings.json"),
-		OnReread: func(k string) { cleared = k }}
+		OnReread: func(k string) { cleared = k }, SyncShelves: true}
 	if n, err := rs.Run(context.Background()); err != nil || n != 1 {
 		t.Fatalf("got %d %v", n, err)
 	}

@@ -42,6 +42,10 @@ type RateSync struct {
 	// OnReread is called when a shelf choice starts a re-read (daemon: clear
 	// its "finished" mark for the book).
 	OnReread func(key string)
+	// SyncShelves sends the Goodreads shelf choice from the end-of-book
+	// dialog as a Hardcover status. Off in the first release (user decision
+	// 2026-09-28: default logic only); the code stays for a later release.
+	SyncShelves bool
 
 	mu    sync.Mutex // guards st
 	st    *RateState
@@ -79,6 +83,9 @@ func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
 	r.mu.Lock()
 	st := r.state()
 	_, err = r.collect(ctx, st)
+	if !r.SyncShelves {
+		clear(st.Shelves) // choices saved by an older version
+	}
 	shelves := make(map[string]int, len(st.Shelves))
 	for k, v := range st.Shelves {
 		shelves[k] = v
@@ -168,6 +175,10 @@ func (r *RateSync) collect(ctx context.Context, st *RateState) (n int, err error
 				r.S.logf("research: %s %s", x.Schema, x.JSON)
 			}
 			if status, key, raw := metrics.ShelfChoice(x.JSON); status != metrics.ShelfNone && key != "" {
+				if !r.SyncShelves {
+					r.S.logf("shelf: book %s → %q ignored (shelf sync is off)", short8(key), raw)
+					continue
+				}
 				st.Shelves[key] = status
 				n++
 				r.S.logf("shelf: book %s → %q (Hardcover status %d)", short8(key), raw, status)

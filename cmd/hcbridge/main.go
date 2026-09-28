@@ -41,6 +41,11 @@ import (
 // It is public by design (OAuth public client, no secret).
 var clientID = ""
 
+// syncShelves: send the Goodreads shelf choice from the end-of-book dialog
+// as a Hardcover status. Off in the first release (user decision
+// 2026-09-28: default logic only); built and tested, ready to turn on.
+const syncShelves = false
+
 // version is set at build time: -ldflags "-X main.version=..."
 var version = "dev"
 
@@ -231,7 +236,7 @@ func (a *app) clipSync() *syncer.ClipSync {
 }
 
 func (a *app) rateSync() *syncer.RateSync {
-	return &syncer.RateSync{S: a.syncer(), Books: a.db, Path: metrics.DefaultPath,
+	return &syncer.RateSync{S: a.syncer(), Books: a.db, Path: metrics.DefaultPath, SyncShelves: syncShelves,
 		StatePath: filepath.Join(a.stateDir, "ratings.json")}
 }
 

@@ -114,6 +114,13 @@ Proposed rule (**to confirm with a test**):
   the sent-clippings list grows, one file instead of several JSON files.
   No size gain (state is a few KB). The SQLite driver is already in the
   binary (used for cc.db). Today: JSON files in `/var/local/hcbridge/`.
+- **Goodreads shelf choice → Hardcover status** (user decision 2026-09-28:
+  off in the first release, "default logic only"). Built and device-tested
+  (forward only; "Currently Reading" on a Read book = re-read). Turn on with
+  `syncShelves = true` in `cmd/hcbridge/main.go`. While off, the choice is
+  only logged.
+- **Telemetry to S3** (out of scope for now): design in
+  `docs/decisions/telemetry.md`.
 - **Rating Error dialog (approved: B + C):** close the stock error dialog
   after a star tap (window manager, format UNVERIFIED), then show a short
   "Saved to Hardcover" message. Dialog state research is in the daemon log.
