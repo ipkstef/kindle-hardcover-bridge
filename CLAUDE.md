@@ -42,14 +42,19 @@ internal/readers/    database, filesystem, lipc, pagemap backends
 internal/book/       book identity (ASIN, title, author, ISBN)
 internal/hardcover/  OAuth device flow, token refresh, GraphQL client
 internal/config/     config + token storage
+cmd/probe/           one-shot device test (see docs/probe.md)
+internal/certs/      bundled CA roots
 packaging/           KUAL extension / install scripts
+scripts/             build scripts
 docs/                context docs (read these)
 ```
 
 ## Where we left off
-Research phase. Next step (not yet chosen by the user):
+Research phase. Built the device probe (`docs/probe.md`). Waiting for the user
+to run it and send `hcprobe-report.txt`. The report decides the Go version.
+Then:
 - A) Read `kindle-reading-dashboard` + NickelHardcover source; list exact `cc.db`
-  fields and Hardcover mutations needed. **(Recommended first.)**
+  fields and Hardcover mutations needed.
 - B) Prototype: device-code login + one progress update to Hardcover.
 
 ## Docs
@@ -58,6 +63,7 @@ Research phase. Next step (not yet chosen by the user):
 - `docs/hardcover-api.md` — GraphQL + OAuth device flow details
 - `docs/open-questions.md` — unknowns and risks
 - `docs/references.md` — links and prior art
+- `docs/probe.md` — device probe: what it checks, how to run it
 
 ## Working rules for Claude
 - Mark anything not verified on a real device or in real docs as **UNVERIFIED**.

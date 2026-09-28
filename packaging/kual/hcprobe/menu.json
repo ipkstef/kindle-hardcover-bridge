@@ -1,0 +1,12 @@
+{
+	"items": [
+		{
+			"name": "Hardcover probe",
+			"priority": 0,
+			"items": [
+				{ "name": "1. Run test (Wi-Fi on)", "priority": 1, "action": "/bin/sh ./run.sh" },
+				{ "name": "2. Copy reading DB to USB (optional)", "priority": 2, "action": "/bin/sh ./copydb.sh" }
+			]
+		}
+	]
+}
