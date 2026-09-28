@@ -17,10 +17,9 @@ const (
 
 // dialogProbe records the window manager while the user taps stars in the
 // end-of-book dialog, to find a way to close the "Rating Error" dialog
-// (roadmap "Later", option B + C). It changes nothing in the reader. The
-// only writes are the window manager's two list requests (getAllWindows,
-// visibleWindows), which are expected to print to the system log
-// (UNVERIFIED).
+// (roadmap "Later", option B + C). It only reads: LIPC properties, the
+// system log and system files. (The winmgr list requests getAllWindows and
+// visibleWindows were removed: they only threw Lua errors, probe 2026-09-28.)
 func (a *app) dialogProbe(ctx context.Context) error {
 	f, err := os.Create(dialogProbeOut)
 	if err != nil {
@@ -45,16 +44,15 @@ func (a *app) dialogProbe(ctx context.Context) error {
 	// (UNVERIFIED). Needed to show our own box (e.g. a half-star picker).
 	section("pillow dialog files", runOut(ctx, 30*time.Second, "find", "/usr/share", "/usr/lib", "/opt",
 		"-maxdepth", "6", "-path", "*pillow*", "(", "-name", "*.html", "-o", "-name", "*.js", "-o", "-name", "*.json", ")"))
+	// How winmgr handles fakeKeyEvent / fakeTap (to close the error dialog).
+	section("winmgr lua handlers", runOut(ctx, 20*time.Second, "grep", "-n", "-A25",
+		"-e", "fakeKeyEvent", "-e", "fakeTap", "-e", "activeDialogCount", "-r", "/etc/xdg/awesome"))
+	section("pillow: customDialog / pillowAlert users", runOut(ctx, 30*time.Second, "grep", "-rln",
+		"-e", "customDialog", "-e", "pillowAlert", "/usr/share", "/usr/lib", "/opt"))
 	dump := func(why string) {
-		for _, svc := range []string{"com.lab126.winmgr", "com.lab126.pillow"} {
-			section(why+": lipc-probe -v "+svc, runOut(ctx, 15*time.Second, "lipc-probe", "-v", svc))
-		}
-		for _, p := range []string{"getAllWindows", "visibleWindows"} {
-			section(why+": set winmgr "+p, runOut(ctx, 5*time.Second, "lipc-set-prop", "com.lab126.winmgr", p, ""))
-		}
 		time.Sleep(300 * time.Millisecond) // let syslog catch up
-		section(why+": /var/log/messages (last 60 lines)", tailFile("/var/log/messages", 60))
-		section(why+": ps", runOut(ctx, 10*time.Second, "ps"))
+		section(why+": dialog lines in /var/log/messages", grepLines(tailFile("/var/log/messages", 400),
+			"kdialog", "kindleframefactory", "ratingcontroller", "goodreads"))
 	}
 	dump("start")
 
@@ -77,6 +75,7 @@ func (a *app) dialogProbe(ctx context.Context) error {
 		lastN = n
 		time.Sleep(300 * time.Millisecond)
 	}
+	dump("end")
 	w("done")
 	a.screen.Show("Dialog probe: done.", "Connect USB and send", "  hcbridge-dialogprobe.txt")
 	return nil

@@ -231,10 +231,17 @@ func logDialog(ctx context.Context) {
 	}
 }
 
+// lipcGet reads one LIPC property. String properties need -s: without it
+// lipc-get-prop tries Int first, and winmgr logs a warning to the system log
+// on each read (device probe 2026-09-28).
 func lipcGet(ctx context.Context, svc, prop string) string {
 	c, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	b, err := exec.CommandContext(c, "lipc-get-prop", svc, prop).CombinedOutput()
+	args := []string{svc, prop}
+	if prop == "getActiveAppTitle" {
+		args = []string{"-s", svc, prop}
+	}
+	b, err := exec.CommandContext(c, "lipc-get-prop", args...).CombinedOutput()
 	if err != nil {
 		return "error: " + err.Error()
 	}

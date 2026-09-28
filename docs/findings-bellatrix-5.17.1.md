@@ -318,3 +318,21 @@ tap (read-only research).
   Bane): A Novel of the Old Republic" → Hardcover "Darth Bane: Path of
   Destruction" via ISBN (dedicated field, title differs).
 - Scan trigger lines work: `start`, `db commit`, `left book`, `network up`.
+
+## Dialog probe #1 (version 9050712, 2026-09-28 03:49–03:50 device time)
+End-of-book dialogs are **Java dialogs in cvm (KDialog)**, not pillow. The
+system log (`/var/log/messages`) names each window:
+- `…_A_SelectShelfDialog` — the shelf list.
+- Star tap → `…_A_UpdatingDialog` → Goodreads call fails → dismissed →
+  `…_A_ConfirmationDialog` = **the "Rating Error" box**.
+- Cause: `GoodreadsShelfManager: GetBookByAsinRequest failed; status = 404`
+  → `RatingController: Error on upating rating/shelf: UNKNOWN`. The book key
+  is a Calibre UUID, not an Amazon ASIN, so Goodreads cannot find it
+  (UNVERIFIED for store books; they may not show the error).
+- The rating record (`goodreads_book_ratings`, `change_rating`) is written
+  **before** the Goodreads call, so our sync does not depend on it.
+- winmgr has `fakeKeyEvent`, `fakeTap` (write, Str) — candidates to close the
+  box (format UNVERIFIED). `getAllWindows` / `visibleWindows` only throw Lua
+  errors (`lab126_asr.lua`).
+- `lipc-get-prop` without `-s` on `getActiveAppTitle` makes winmgr log a
+  type warning on every read → now read with `-s`.
