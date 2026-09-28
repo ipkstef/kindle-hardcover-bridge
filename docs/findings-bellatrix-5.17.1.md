@@ -152,3 +152,49 @@ Identify on device (live API):
 - "Games Wizards Play": ISBN 9780544633711 (EXTH 104) → `editions.isbn_13` →
   book 651967. Correct. **`editions.isbn_13` filter works.**
 - `editions.asin` still untested (no ASIN on this device).
+
+## Sleep research (probe item 7, 2026-09-28, 04:11–04:20 UTC)
+Book: an AZW3 (Calibre) with an `.apnx` page map in its `.sdr` folder.
+Steps: open book, read, short sleep, wake, read, long sleep (~5 min), wake,
+go Home. Raw data not in the repo (the LIPC dump holds account data).
+
+**Sleeping inside the book writes the position** (both sleeps):
+| UTC | Event | cc.db percent | `.azw3f` lpr/fpr |
+|---|---|---|---|
+| 04:12:02 | open book | 2.457042 | 22929 |
+| 04:12:25.6 | `goingToScreenSaver` | → **5.395857** (04:12:26) | → **50343** (04:12:26) |
+| 04:13:36.9 | `goingToScreenSaver` | → **7.290831** (04:13:37) | → **68089** (04:13:37) |
+| 04:19:08 | go Home | (no change, no pages turned) | rewritten |
+
+- Writes happen < 1 s after `goingToScreenSaver`: `.azw3f`, `.azw3r`,
+  `cc.db`, `/var/local/java/prefs/<hash>.reader.pref`.
+- Test 2 (another book) saw no percent change on sleep. Cause **UNVERIFIED**;
+  this test is clearer (hash-checked files, two sleeps, both wrote).
+
+**`.azw3f` sidecar** (303 bytes, binary key/value store, rewritten via
+`.tmp` + rename): holds ASCII keys `timer.model`, `timer.average.calculator`,
+`fpr` (furthest position read), `lpr` (last position read),
+`book.info.store`, `page.history.store`, `whisperstore.migration.status`.
+`fpr`/`lpr` are decimal strings = text position.
+Check: lpr / (percent/100) = 933195, 932994, 933899 → constant (≈ book text
+length). So percent ≈ lpr / text length. Exact format **UNVERIFIED** (only
+MOBI/AZW3 seen; KFX uses `.yjr`/`.yjf`).
+
+**Page map:** the `.sdr` has an `.apnx` (1882 bytes) → printed page numbers
+possible (page whose start position ≤ lpr).
+
+**Power and Wi-Fi during sleep:**
+- `goingToScreenSaver` → ~70 s later `readyToSuspend` countdown → Wi-Fi
+  `cmDisconnected` (04:14:47) → `suspending "mem"`.
+- While asleep the device wakes briefly (`wakeupFromSuspend`) and suspends
+  again about every 95 s. Wi-Fi stays off.
+- Wake: `resuming` → `outOfScreenSaver` → Wi-Fi `cmConnected` +
+  `connectionAvailable "wifi"` **~1.5 s later**.
+- So: after sleep there is a ~60 s window with Wi-Fi to send; if missed,
+  `connectionAvailable` on wake is a reliable retry trigger.
+
+**LIPC:** no live position property found. Related names (not readable):
+`com.lab126.KPPAnnotationController saveReadingProgress`,
+`com.lab126.CVMAnnotationProxy sendReadingProgress`,
+`com.lab126.whisperstore ingest_lpr_sidecar`,
+`com.lab126.yjr.annotations gotoBookPosition`.

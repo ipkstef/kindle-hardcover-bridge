@@ -19,11 +19,18 @@ See findings "Events test". Design:
 - `lipc-wait-event` is a Kindle tool, not curl/Python; exists on FW 5.x.
   Present on old firmware: **UNVERIFIED**. inotify needs only the kernel.
 
-## 1b. Sleep inside a book (user: this matters)
-cc.db percent is written only on go-Home, not on sleep (tests 1–2). Many
-readers never go Home. Candidates for a position written on sleep: the
-book's sidecar (`.azw3f` written on sleep, test 2), LIPC reader properties,
-other `/var/local` DBs (e.g. `wsync.db`). Probe item 7 records all of them.
+## 1b. Sleep inside a book (user: this matters) — solved on FW 5.17.1
+Sleep research (findings): on `goingToScreenSaver` the reader writes cc.db
+percent **and** the `.azw3f` sidecar (`lpr`/`fpr` text positions) within 1 s.
+Wi-Fi stays up ~70 s, and `connectionAvailable` fires ~1.5 s after wake.
+Daemon: add `goingToScreenSaver` as a trigger (done); send within the window;
+retry on wake.
+
+Next (capability model, decision 4):
+- **sidecar backend:** read `lpr`/`fpr` from `.azw3f`; cross-check cc.db
+  percent; gives a real position even if cc.db is late.
+- **pagemap backend:** `.apnx` in the `.sdr` → printed page for `lpr`
+  (send real page numbers when present).
 
 ## 2. Find the book on Hardcover (waterfall) — works on device (ISBN + library steps)
 Code: `internal/book/identity.go` (collect IDs), `internal/match/resolve.go`

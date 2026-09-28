@@ -30,6 +30,8 @@ func (a *app) statePath() string { return filepath.Join(a.stateDir, "state.json"
 
 // daemon runs until SIGTERM. Triggers (docs/roadmap.md §1):
 //   - LIPC appmgrd: appPaused "com.lab126.booklet.reader" (user left the book)
+//   - LIPC powerd: goingToScreenSaver (sleep inside the book writes the
+//     position; Wi-Fi stays up ~70 s after it)
 //   - inotify: cc.db-journal deleted (DB commit) or cc.db-wal modified
 //   - LIPC cmd: connectionAvailable (Wi-Fi back: retry pending)
 //   - a safety poll every 15 min
@@ -76,6 +78,14 @@ func (a *app) daemon(ctx context.Context) error {
 		caps = append(caps, "lipc: "+err.Error())
 	} else {
 		caps = append(caps, "lipc appmgrd: ok")
+		onPower := func(line string) {
+			if strings.HasPrefix(strings.TrimSpace(line), "goingToScreenSaver") {
+				fire("sleep")
+			}
+		}
+		if err := events.LIPC(ctx, "com.lab126.powerd", onPower, log.Printf); err == nil {
+			caps = append(caps, "lipc powerd: ok")
+		}
 		onNet := func(line string) {
 			if strings.Contains(line, "connectionAvailable") {
 				fire("network up")
