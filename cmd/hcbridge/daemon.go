@@ -138,8 +138,9 @@ func (a *app) daemon(ctx context.Context) error {
 	}
 	// The Kindle empties fmcache.db soon after a star tap, so read it right
 	// after it changes (not only at scans).
-	go watchRatings(ctx, filepath.Dir(metrics.DefaultPath), runRatings)
-	d := &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), Logf: log.Printf,
+	var d *daemon.Daemon
+	ratings.OnReread = func(key string) { d.ClearFinished(key) }
+	d = &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), Logf: log.Printf,
 		After: func(ctx context.Context) {
 			runRatings(ctx)
 			if n, err := clips.Run(ctx, false); err != nil {
@@ -148,6 +149,8 @@ func (a *app) daemon(ctx context.Context) error {
 				log.Printf("daemon: clips: %d sent", n)
 			}
 		}}
+	// Start the ratings watcher only now: it may call OnReread → d.
+	go watchRatings(ctx, filepath.Dir(metrics.DefaultPath), runRatings)
 	scan := func(why string) {
 		sctx, scancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer scancel()

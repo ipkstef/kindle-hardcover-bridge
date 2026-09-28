@@ -20,7 +20,12 @@ import (
 // Fallback: the Kindle marks the book read (p_readState = 2).
 const FinishedPercent = 99.0
 
-// IsFinished applies the finish rule.
+// RestartPercent: a finished book under this percent is being read again.
+const RestartPercent = 5.0
+
+// IsFinished applies the finish rule. The daemon passes read state 2 only
+// when it just changed to 2: the Kindle keeps state 2 after the user goes
+// back to the start (device log 2026-09-28), so a steady 2 is not a finish.
 func IsFinished(pct float64, readState int) bool {
 	return pct > FinishedPercent || readState == 2
 }
@@ -210,8 +215,13 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 		}
 		s.logf("sync: moved user_book %d from Want to Read to Currently Reading", ub.ID)
 		ub, added = nub, "moved from Want to Read"
+	case ub.StatusID == hardcover.StatusRead && pct < RestartPercent:
+		// Finished on Hardcover, back at the start on the Kindle: a re-read
+		// (user decision 2026-09-28).
+		out, _, err := s.Reread(ctx, local, res, ub, pct)
+		return out, err
 	case ub.StatusID != hardcover.StatusReading:
-		return skip(res.Title, "shelf is "+StatusName(ub.StatusID)+" (re-read: not built yet)")
+		return skip(res.Title, "shelf is "+StatusName(ub.StatusID))
 	}
 	// After an add or status change, the returned entry already holds the
 	// read Hardcover created (seen 2026-09-28), so no extra lookup is needed.
@@ -350,4 +360,49 @@ func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Resul
 		out.Title = ub.Book.Title
 	}
 	return out, nub, nil
+}
+
+// Reread starts a new read of a book that is Read on Hardcover (user
+// decision: "Currently Reading" after a finish, or back under
+// RestartPercent, is a re-read). Order: status Currently Reading first (the
+// answer holds the entry's reads), then use an open read if Hardcover made
+// one, else add a new read with today's date.
+func (s *Syncer) Reread(ctx context.Context, local *book.Local, res *match.Result, ub *hardcover.UserBook, pct float64) (Outcome, *hardcover.UserBook, error) {
+	today := time.Now().Format("2006-01-02")
+	if ub == nil {
+		nub, err := s.addUserBook(ctx, res, hardcover.StatusReading)
+		if err != nil {
+			return Outcome{}, nil, err
+		}
+		s.logf("sync: re-read: added %q as Currently Reading", res.Title)
+		return Outcome{Kind: Sent, Title: res.Title, Added: "re-read started"}, nub, nil
+	}
+	nub, err := s.C.SetStatus(ctx, ub.ID, hardcover.StatusReading)
+	if err != nil {
+		return Outcome{}, nil, err
+	}
+	pages, editionID := nub.Pages()
+	if pages <= 0 && res.Pages > 0 {
+		pages, editionID = res.Pages, res.EditionID
+	}
+	page := 0
+	if pct < FinishedPercent {
+		page = book.PercentToPage(pct, pages)
+	}
+	if r := nub.CurrentRead(); r != nil {
+		if r.EditionID != nil {
+			editionID = r.EditionID
+		}
+		if _, err := s.C.UpdateReadProgress(ctx, r.ID, page, editionID, r.StartedAt); err != nil {
+			return Outcome{}, nil, err
+		}
+		s.logf("sync: re-read: using open read %d, page %d", r.ID, page)
+	} else {
+		r, err := s.C.InsertRead(ctx, nub.ID, page, editionID, today)
+		if err != nil {
+			return Outcome{}, nil, err
+		}
+		s.logf("sync: re-read: new read %d from %s, page %d", r.ID, today, page)
+	}
+	return Outcome{Kind: Sent, Title: res.Title, Page: page, Pages: pages, Added: "re-read started"}, nub, nil
 }

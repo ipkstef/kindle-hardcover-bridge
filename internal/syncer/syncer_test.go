@@ -154,3 +154,29 @@ func TestFinishNotTwiceSameDay(t *testing.T) {
 		}
 	}
 }
+
+// Book Read on Hardcover, back at 2 % on the Kindle → re-read: status
+// Currently Reading, then progress on the open read.
+func TestRereadOnRestart(t *testing.T) {
+	f := newFake(3)
+	f.reply["update_user_book"] = strings.Replace(f.reply["update_user_book"], `"status_id":3`, `"status_id":2`, 1)
+	s := &Syncer{C: f.client(t), Logf: t.Logf}
+	l := redRising
+	l.Percent = 2
+	out, err := s.Sync(context.Background(), &l)
+	if err != nil || out.Added != "re-read started" || out.Page != 8 {
+		t.Fatalf("got %+v %v", out, err)
+	}
+	iStatus, iRead := -1, -1
+	for i, op := range f.ops {
+		switch op {
+		case "update_user_book":
+			iStatus = i
+		case "update_user_book_read":
+			iRead = i
+		}
+	}
+	if iStatus < 0 || iRead < 0 || iStatus > iRead {
+		t.Fatalf("order %v", f.ops)
+	}
+}

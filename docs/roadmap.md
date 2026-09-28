@@ -78,7 +78,15 @@ KFX: no file metadata yet (cc.db fields only).
   default (user controls it on Hardcover). Notes/quotes always private.
 - **No reviews** from the Kindle → no `write:reviews` scope.
 
-## 3. Restart a book
+## 3. Restart a book — built (user decision 2026-09-28)
+Re-read = (a) end-of-book shelf choice "Currently Reading" on a finished
+book, or (b) a book that is Read on Hardcover goes under 5 % on the Kindle.
+Action: status Currently Reading, then the open read (if Hardcover made one)
+or a new read dated today. The daemon's "finished" mark is cleared.
+Kindle read state 2 counts as "finished" only when it changes to 2 (the
+Kindle keeps 2 after going back to the start).
+
+## 3 (old notes)
 The Kindle has no "restart" concept; the user just goes to the start.
 Proposed rule (**to confirm with a test**):
 - Hardcover read is finished (status Read / `finished_at` set), and the Kindle

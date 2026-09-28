@@ -26,17 +26,19 @@ func (f *fakeSrc) AllProgress(context.Context) (map[string]readers.Progress, err
 }
 
 func (f *fakeSrc) BookByKey(_ context.Context, k string) (*book.Local, error) {
-	return &book.Local{Key: k, Title: k, Percent: f.m[k].Percent}, nil
+	return &book.Local{Key: k, Title: k, Percent: f.m[k].Percent, ReadState: f.m[k].ReadState}, nil
 }
 
 type fakeSync struct {
-	calls    []string
-	fail     bool
-	finished bool
+	calls      []string
+	readStates []int
+	fail       bool
+	finished   bool
 }
 
 func (f *fakeSync) Sync(_ context.Context, l *book.Local) (syncer.Outcome, error) {
 	f.calls = append(f.calls, l.Key)
+	f.readStates = append(f.readStates, l.ReadState)
 	if f.fail {
 		return syncer.Outcome{}, errors.New("network down")
 	}
@@ -147,5 +149,29 @@ func TestFinishOnlyOnce(t *testing.T) {
 	d.Scan(context.Background())
 	if len(s.calls) != 1 {
 		t.Fatalf("after restart: %v", s.calls)
+	}
+}
+
+// Device log 2026-09-28: after a finish the Kindle keeps read state 2 when the
+// user goes back to 8 %. A steady 2 must not reach the syncer as "finished".
+func TestSteadyReadStateNotFinish(t *testing.T) {
+	src := &fakeSrc{m: map[string]readers.Progress{"a": {Percent: 100, LastAccess: 100, ReadState: 2}}}
+	s := &fakeSync{}
+	d := newD(t, src, s)
+	d.Scan(context.Background()) // baseline + latest
+	s.calls, s.readStates = nil, nil
+	src.m["a"] = readers.Progress{Percent: 8.39, LastAccess: 200, ReadState: 2}
+	d.Scan(context.Background())
+	if len(s.readStates) != 1 || s.readStates[0] != 0 {
+		t.Fatalf("read states %v", s.readStates)
+	}
+	// A change to 2 is passed on.
+	src.m["b"] = readers.Progress{Percent: 60, LastAccess: 300}
+	d.Scan(context.Background())
+	s.readStates = nil
+	src.m["b"] = readers.Progress{Percent: 60, LastAccess: 400, ReadState: 2}
+	d.Scan(context.Background())
+	if len(s.readStates) != 1 || s.readStates[0] != 2 {
+		t.Fatalf("change to 2: %v", s.readStates)
 	}
 }

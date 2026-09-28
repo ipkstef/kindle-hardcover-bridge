@@ -39,7 +39,10 @@ type RateSync struct {
 	StatePath string
 	// OnTap is called when a new star tap is read (daemon: log the dialog).
 	OnTap func()
-	mu    sync.Mutex
+	// OnReread is called when a shelf choice starts a re-read (daemon: clear
+	// its "finished" mark for the book).
+	OnReread func(key string)
+	mu       sync.Mutex
 }
 
 // researchSchemas are logged in full to learn their format (shelf choice,
@@ -195,6 +198,17 @@ func (r *RateSync) sendShelf(ctx context.Context, key string, status int) error 
 			r.S.logf("shelf: %q → Read (%v)", local.Title, out.Kind)
 		}
 		return err
+	}
+	if status == metrics.ShelfReading && (ub == nil || ub.StatusID == hardcover.StatusRead) {
+		// "Currently Reading" at the end of a book = re-read (user decision).
+		if _, _, err := r.S.Reread(ctx, local, res, ub, 0); err != nil {
+			return err
+		}
+		if r.OnReread != nil {
+			r.OnReread(key)
+		}
+		r.S.logf("shelf: %q → Currently Reading (re-read)", local.Title)
+		return nil
 	}
 	switch {
 	case ub == nil:

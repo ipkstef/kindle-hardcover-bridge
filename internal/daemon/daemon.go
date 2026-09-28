@@ -174,6 +174,11 @@ func (d *Daemon) Scan(ctx context.Context) error {
 			st.Snapshot[k] = p
 			continue
 		}
+		// Read state 2 counts only when it just changed to 2: the Kindle
+		// keeps 2 after the user goes back to the start.
+		if old, ok := st.Snapshot[k]; ok && old.ReadState == 2 && p.ReadState == 2 {
+			local.ReadState = 0
+		}
 		d.Logf("daemon: %q changed to %.2f%%", local.Title, p.Percent)
 		out, err := d.Sync.Sync(ctx, local)
 		if err != nil {
@@ -206,8 +211,26 @@ func (d *Daemon) Scan(ctx context.Context) error {
 }
 
 // RestartPercent: a finished book that goes back under this percent was
-// restarted.
-const RestartPercent = 5.0
+// restarted (same rule as the syncer).
+const RestartPercent = syncer.RestartPercent
+
+// ClearFinished forgets that a book was finished (a re-read started).
+func (d *Daemon) ClearFinished(key string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.state == nil {
+		st, err := LoadState(d.StatePath)
+		if err != nil {
+			return
+		}
+		d.state = st
+	}
+	if _, ok := d.state.Finished[key]; ok {
+		delete(d.state.Finished, key)
+		_ = d.save()
+		d.Logf("daemon: book %s: re-read, finished mark cleared", short(key))
+	}
+}
 
 // Status returns a copy of the state (after at least one scan or load).
 func (d *Daemon) Status() State {

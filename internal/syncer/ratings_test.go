@@ -112,3 +112,32 @@ func TestRatingCallCount(t *testing.T) {
 		t.Fatalf("second rating: %d calls %v", len(f.ops), f.ops)
 	}
 }
+
+func TestShelfReadingOnReadBookIsReread(t *testing.T) {
+	dir := t.TempDir()
+	fm := filepath.Join(dir, "fmcache.db")
+	db, _ := sql.Open("sqlite", fm)
+	db.Exec(`CREATE TABLE records (id INTEGER PRIMARY KEY, schema_name TEXT, created_timestamp INTEGER, record TEXT)`)
+	db.Exec(`INSERT INTO records VALUES (1,'goodreads_autoshelvings',1000,'{"action_id":"PerformManualShelving","kindle_asin":"k","shelf_status":"currently-reading"}')`)
+	db.Close()
+	f := newFake(3)
+	var cleared string
+	rs := &RateSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
+		Path: fm, StatePath: filepath.Join(dir, "ratings.json"),
+		OnReread: func(k string) { cleared = k }}
+	if n, err := rs.Run(context.Background()); err != nil || n != 1 {
+		t.Fatalf("got %d %v", n, err)
+	}
+	if cleared != "k" {
+		t.Fatalf("finished mark not cleared")
+	}
+	var status any
+	for i, op := range f.ops {
+		if op == "update_user_book" {
+			status = f.vars[i]["status"]
+		}
+	}
+	if status != float64(2) {
+		t.Fatalf("status %v ops %v", status, f.ops)
+	}
+}
