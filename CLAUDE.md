@@ -24,11 +24,16 @@ state from the **stock Amazon Kindle reader** and sends it to **Hardcover.app**.
    1. Kindle local reading DB (e.g. `cc.db`) — most likely stable across firmware.
    2. Filesystem / process checks — which book is open.
    3. LIPC (`lipc-get-prop`) — extra data where available. Never required.
-3. **Canonical position = identifier + location + percent.** Page number is optional
-   and only sent when a reliable page map (APNX) exists.
-4. **Capability model.** Several reader backends (`database`, `filesystem`, `lipc`,
-   `pagemap`). The daemon asks "give me the best state you can find", it does not
-   require one specific property.
+3. **Position = percent, from the first usable source** (user decision
+   2026-09-28, `internal/syncer/position.go`):
+   1. `cc.db` `p_percentFinished` (confirmed: written on go-Home and sleep);
+   2. `cc.db` `p_lastAccessedPosition` ÷ text length (empty on FW 5.17.1);
+   3. sidecar `.azw3f` `lpr` ÷ text length — **fallback only**, always logged
+      as a cross-check.
+   Hardcover page = percent × edition pages. **APNX page maps are dropped**
+   (Calibre APNX on the device is synthetic: fixed 2300 chars per page).
+4. **Capability model.** Backends are optional (`database`, `sidecar`, `lipc`,
+   `inotify`); a missing one must never stop the daemon.
 5. **Auth = Hardcover OAuth Device Authorization Grant.** Kindle shows a code/QR,
    user approves on phone at hardcover.app/link. No token typing on the Kindle.
 6. **Runtime: one static ARM binary in Go** (`CGO_ENABLED=0`), with its own TLS
@@ -39,7 +44,8 @@ state from the **stock Amazon Kindle reader** and sends it to **Hardcover.app**.
 ## Proposed layout
 ```
 cmd/daemon/          entry point, poll loop, change detection
-internal/readers/    database, filesystem, lipc, pagemap backends
+internal/readers/    cc.db reader
+internal/sidecar/    KRDS sidecar reader (.azw3f lpr/fpr)
 internal/book/       book identity (ASIN, title, author, ISBN)
 internal/hardcover/  OAuth device flow, token refresh, GraphQL client
 internal/config/     config + token storage
@@ -73,7 +79,10 @@ device. The user wants to **discuss system design before it is locked in**.
 User: syncing when sleeping **inside** a book matters (no go-Home). Sleep
 research done: sleep writes cc.db percent + `.azw3f` lpr/fpr; Wi-Fi up ~70 s
 after sleep, back ~1.5 s after wake (findings, roadmap §1b). Daemon now also
-triggers on `goingToScreenSaver`. Next candidates: sidecar + APNX backends.
+triggers on `goingToScreenSaver`. Sidecar reader built (KRDS parser,
+`internal/sidecar`) as the 3rd position source; APNX dropped.
+Next: Hardcover features research (journals/notes, ratings, finish hook),
+then build the daemon for device testing.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

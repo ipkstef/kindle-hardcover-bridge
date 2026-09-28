@@ -13,6 +13,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/match"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/mobi"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/sidecar"
 )
 
 // FinishedPercent: at or above this, the book counts as finished. Finishing
@@ -134,8 +135,27 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 		s.logf("sync: not sent: %s", why)
 		return Outcome{Kind: Skipped, Title: title, Reason: why}, nil
 	}
-	if local.Percent <= 0 {
+	// Position: cc.db percent, then cc.db last position, then sidecar lpr.
+	var meta *mobi.Meta
+	if !strings.Contains(local.MimeType, "kfx") {
+		meta, _ = mobi.ReadFile(local.Path)
+	}
+	var sc *sidecar.Position
+	if p, err := sidecar.ForBook(local.Path); err == nil {
+		sc = &p
+	}
+	pct, src, notes := ResolvePercent(local, meta, sc)
+	for _, n := range notes {
+		s.logf("position: %s", n)
+	}
+	if pct <= 0 {
 		return skip(local.Title, "book not started on the Kindle")
+	}
+	s.logf("position: %.2f%% from %s", pct, src)
+	if pct != local.Percent {
+		cp := *local
+		cp.Percent = pct
+		local = &cp
 	}
 	res, ub, err := s.Identify(ctx, local)
 	if errors.Is(err, ErrNotFound) {

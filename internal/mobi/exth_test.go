@@ -29,6 +29,7 @@ func build(fullName string, recs []rec, withEXTH bool) []byte {
 	f.Write(make([]byte, 4))
 
 	rec0 := make([]byte, 16+mobiLen)
+	binary.BigEndian.PutUint32(rec0[4:], 933800) // text length
 	copy(rec0[16:], "MOBI")
 	binary.BigEndian.PutUint32(rec0[20:], mobiLen)
 	binary.BigEndian.PutUint32(rec0[0x80:], 0x40) // EXTH flag
@@ -67,6 +68,9 @@ func TestRead(t *testing.T) {
 	}
 	if m.First(ExthISBN) != "978-0-593-82025-3" || len(m.EXTH[ExthAuthor]) != 2 || m.Title() != "A Parade of Horribles" {
 		t.Fatalf("got %+v", m)
+	}
+	if m.TextLength != 933800 {
+		t.Fatalf("text length %d", m.TextLength)
 	}
 	if m.FullName != "Parade of Horribles" {
 		t.Fatalf("full name %q", m.FullName)

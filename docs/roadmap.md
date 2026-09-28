@@ -26,11 +26,10 @@ Wi-Fi stays up ~70 s, and `connectionAvailable` fires ~1.5 s after wake.
 Daemon: add `goingToScreenSaver` as a trigger (done); send within the window;
 retry on wake.
 
-Next (capability model, decision 4):
-- **sidecar backend:** read `lpr`/`fpr` from `.azw3f`; cross-check cc.db
-  percent; gives a real position even if cc.db is late.
-- **pagemap backend:** `.apnx` in the `.sdr` → printed page for `lpr`
-  (send real page numbers when present).
+Position sources (built, user decision): cc.db percent → cc.db
+`p_lastAccessedPosition` → sidecar `lpr` (fallback; logged as cross-check).
+APNX page maps dropped: the device's APNX is Calibre-made with a fixed 2300
+chars per page (not printed pages), so it adds nothing over percent.
 
 ## 2. Find the book on Hardcover (waterfall) — works on device (ISBN + library steps)
 Code: `internal/book/identity.go` (collect IDs), `internal/match/resolve.go`

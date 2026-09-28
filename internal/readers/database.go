@@ -30,7 +30,8 @@ const bookFilter = `p_type = 'Entry:Item' AND p_cdeType IN ('EBOK', 'PDOC')
 
 const bookColumns = `p_cdeKey, p_titles_0_nominal, j_credits, p_location,
 	p_percentFinished, p_lastAccess, p_cdeType, p_mimeType,
-	p_publisher, CAST(p_publicationDate AS TEXT), p_languages_0`
+	p_publisher, CAST(p_publicationDate AS TEXT), p_languages_0,
+	CAST(p_lastAccessedPosition AS TEXT)`
 
 func (d *Database) open() (*sql.DB, error) {
 	return sql.Open("sqlite", "file:"+d.Path+"?mode=ro&_pragma=busy_timeout(5000)")
@@ -96,11 +97,12 @@ func (d *Database) one(ctx context.Context, q string, args ...any) (*book.Local,
 	var (
 		key, title, credits, path               sql.NullString
 		cdeType, mime, publisher, pubDate, lang sql.NullString
+		lastPos                                 sql.NullString
 		percent                                 sql.NullFloat64
 		last                                    sql.NullInt64
 	)
 	err = db.QueryRowContext(ctx, q, args...).Scan(&key, &title, &credits, &path, &percent, &last,
-		&cdeType, &mime, &publisher, &pubDate, &lang)
+		&cdeType, &mime, &publisher, &pubDate, &lang, &lastPos)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNoBook
 	}
@@ -119,6 +121,8 @@ func (d *Database) one(ctx context.Context, q string, args ...any) (*book.Local,
 		Publisher:  publisher.String,
 		PubDate:    pubDate.String,
 		Language:   lang.String,
+
+		LastPosition: lastPos.String,
 	}, nil
 }
 

@@ -21,6 +21,9 @@ type Local struct {
 	Publisher  string   // p_publisher
 	PubDate    string   // p_publicationDate (raw)
 	Language   string   // p_languages_0
+	// LastPosition is p_lastAccessedPosition ("LPR", e.g. "#1234"). Empty on
+	// FW 5.17.1; may be set on other firmware (UNVERIFIED).
+	LastPosition string
 }
 
 // NormTitle makes a title comparable: lower case, no accents, no punctuation,

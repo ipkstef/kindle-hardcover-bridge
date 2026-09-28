@@ -180,8 +180,15 @@ Check: lpr / (percent/100) = 933195, 932994, 933899 → constant (≈ book text
 length). So percent ≈ lpr / text length. Exact format **UNVERIFIED** (only
 MOBI/AZW3 seen; KFX uses `.yjr`/`.yjf`).
 
-**Page map:** the `.sdr` has an `.apnx` (1882 bytes) → printed page numbers
-possible (page whose start position ≤ lpr).
+**Page map:** the `.sdr` has an `.apnx` (1882 bytes): 407 pages, positions
+0, 2300, 4600 … 933800 → Calibre "fast" mode (fixed 2300 chars per page), not
+printed pages. Same units as `lpr` (lpr 68089 → page 30). Not used.
+
+**KRDS format** (decoded, `internal/sidecar`): signature
+`00 00 00 00 00 1a b1 26`; typed values (0 bool, 1 int32, 2 int64, 3 UTF =
+null-flag + uint16 length + bytes, 4 double, 5 short, 6 float, 7 byte, 9 char);
+`fe` + name = object begin, `ff` = end. `lpr` object = byte 2, UTF position,
+int64 save time in ms (equals cc.db `p_lastAccess`).
 
 **Power and Wi-Fi during sleep:**
 - `goingToScreenSaver` → ~70 s later `readyToSuspend` countdown → Wi-Fi

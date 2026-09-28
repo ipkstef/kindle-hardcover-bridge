@@ -41,6 +41,10 @@ type Meta struct {
 	EXTH map[uint32][]string
 	// Records is the number of EXTH records (text or not). 0 = no EXTH.
 	Records int
+	// TextLength is the uncompressed text length from the PalmDOC header
+	// (record 0, offset 4). Sidecar positions count in the same unit
+	// (UNVERIFIED: checked only as a constant ratio on one AZW3).
+	TextLength int64
 }
 
 // First returns the first value of an EXTH type, or "".
@@ -104,7 +108,7 @@ func Read(r io.ReaderAt) (*Meta, error) {
 		return nil, ErrNotMobi
 	}
 	mobiLen := int64(binary.BigEndian.Uint32(mh[20:24]))
-	m := &Meta{EXTH: map[uint32][]string{}}
+	m := &Meta{EXTH: map[uint32][]string{}, TextLength: int64(binary.BigEndian.Uint32(mh[4:8]))}
 
 	if off, n := binary.BigEndian.Uint32(mh[0x54:0x58]), binary.BigEndian.Uint32(mh[0x58:0x5C]); n > 0 && n < 4096 {
 		name := make([]byte, n)
