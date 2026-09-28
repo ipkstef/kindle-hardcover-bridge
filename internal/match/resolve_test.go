@@ -92,7 +92,7 @@ func TestNonDedicatedNeedsTitle(t *testing.T) {
 	lib := []hardcover.UserBook{{ID: 9, BookID: 500, StatusID: 2}}
 	lib[0].Book.Title = "A Parade of Horribles"
 	lib[0].Book.Contributors = contrib("Matt Dinniman")
-	r, steps, _ := Resolve(context.Background(), cat, id, lib)
+	r, steps, _ := Resolve(context.Background(), cat, id, func(context.Context) ([]hardcover.UserBook, error) { return lib, nil })
 	if r == nil || r.BookID != 500 || r.Method != "library" {
 		t.Fatalf("got %+v %v", r, steps)
 	}

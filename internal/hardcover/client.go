@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Status IDs for user_books (hardcover-docs UserBooks.mdx).
@@ -21,13 +25,70 @@ const (
 	StatusIgnored    = 6
 )
 
-// Client is a small Hardcover GraphQL client.
+// Client is a small Hardcover GraphQL client. Use one Client per process:
+// it holds the rate limiter and the cached "me".
 type Client struct {
 	HTTP     *http.Client
 	Endpoint string
 	// Token returns a valid access token (it may refresh it first).
 	Token func(context.Context) (string, error)
+	// Sleep is replaced in tests.
+	Sleep func(context.Context, time.Duration) error
+	// Calls counts requests sent (for logs and tests).
+	Calls int
+
+	mu     sync.Mutex
+	tokens float64   // rate limiter bucket
+	last   time.Time // last refill
+	me     *Me
+	meAt   time.Time
 }
+
+// Rate limit: Hardcover free tier allows 60 requests/min, burst 10
+// (hardcover-docs Getting-Started.mdx). We stay below it.
+const (
+	rateBurst   = 5
+	ratePerSec  = 0.9
+	maxRetry429 = 3
+	meTTL       = time.Hour
+)
+
+// wait takes one token from the bucket, sleeping if needed.
+func (c *Client) wait(ctx context.Context) error {
+	c.mu.Lock()
+	now := time.Now()
+	if c.last.IsZero() {
+		c.tokens, c.last = rateBurst, now
+	}
+	c.tokens = min(rateBurst, c.tokens+now.Sub(c.last).Seconds()*ratePerSec)
+	c.last = now
+	var d time.Duration
+	if c.tokens < 1 {
+		d = time.Duration((1 - c.tokens) / ratePerSec * float64(time.Second))
+	}
+	c.tokens--
+	c.mu.Unlock()
+	if d > 0 {
+		return c.sleep(ctx, d)
+	}
+	return nil
+}
+
+func (c *Client) sleep(ctx context.Context, d time.Duration) error {
+	if c.Sleep != nil {
+		return c.Sleep(ctx, d)
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+var retryInRe = regexp.MustCompile(`(?i)try again in (\d+) second`)
 
 // GraphQLError is one error from a GraphQL response.
 type GraphQLError struct {
@@ -48,8 +109,33 @@ func (e Errors) Error() string {
 // ErrUnauthorized means the token was rejected. The user must sign in again.
 var ErrUnauthorized = errors.New("hardcover: token rejected, sign in again")
 
-// Do runs one GraphQL request and decodes "data" into out.
+// errRetry429 carries the wait time of a 429 answer.
+type errRetry429 struct{ wait time.Duration }
+
+func (e errRetry429) Error() string { return "hardcover: HTTP 429 (rate limit)" }
+
+// Do runs one GraphQL request and decodes "data" into out. It waits for the
+// rate limiter and retries after HTTP 429.
 func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out any) error {
+	for i := 0; ; i++ {
+		if err := c.wait(ctx); err != nil {
+			return err
+		}
+		err := c.do(ctx, query, vars, out)
+		var r429 errRetry429
+		if !errors.As(err, &r429) || i >= maxRetry429 {
+			return err
+		}
+		if err := c.sleep(ctx, r429.wait); err != nil {
+			return err
+		}
+	}
+}
+
+func (c *Client) do(ctx context.Context, query string, vars map[string]any, out any) error {
+	c.mu.Lock()
+	c.Calls++
+	c.mu.Unlock()
 	tok, err := c.Token(ctx)
 	if err != nil {
 		return err
@@ -76,6 +162,17 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrUnauthorized
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		wait := 2 * time.Second
+		if m := retryInRe.FindSubmatch(raw); m != nil {
+			if n, err := strconv.Atoi(string(m[1])); err == nil {
+				wait = time.Duration(n+1) * time.Second
+			}
+		} else if ra, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
+			wait = time.Duration(ra+1) * time.Second
+		}
+		return errRetry429{wait: min(wait, time.Minute)}
 	}
 	var r struct {
 		Data   json.RawMessage `json:"data"`
@@ -109,8 +206,26 @@ type Me struct {
 	PrivacyID *int `json:"account_privacy_setting_id"`
 }
 
-// Me returns the signed-in user.
+// Me returns the signed-in user. Cached for an hour.
 func (c *Client) Me(ctx context.Context) (*Me, error) {
+	c.mu.Lock()
+	if c.me != nil && time.Since(c.meAt) < meTTL {
+		m := c.me
+		c.mu.Unlock()
+		return m, nil
+	}
+	c.mu.Unlock()
+	m, err := c.fetchMe(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.me, c.meAt = m, time.Now()
+	c.mu.Unlock()
+	return m, nil
+}
+
+func (c *Client) fetchMe(ctx context.Context) (*Me, error) {
 	var r struct {
 		Me []Me `json:"me"`
 	}
@@ -209,6 +324,23 @@ const userBookFields = `
 		id started_at finished_at progress_pages edition_id
 		edition { id pages }
 	}`
+
+// UserBookForBook returns the user's shelf entry for one book, or nil.
+func (c *Client) UserBookForBook(ctx context.Context, userID, bookID int) (*UserBook, error) {
+	var r struct {
+		UBs []UserBook `json:"user_books"`
+	}
+	q := `query ($userId: Int!, $bookId: Int!) {
+		user_books(where: {user_id: {_eq: $userId}, book_id: {_eq: $bookId}}, limit: 1) {` + userBookFields + `}
+	}`
+	if err := c.Do(ctx, q, map[string]any{"userId": userID, "bookId": bookID}, &r); err != nil {
+		return nil, err
+	}
+	if len(r.UBs) == 0 {
+		return nil, nil
+	}
+	return &r.UBs[0], nil
+}
 
 // Library returns all books on the user's shelves (any status).
 func (c *Client) Library(ctx context.Context, userID int) ([]UserBook, error) {
@@ -409,22 +541,6 @@ func (c *Client) SearchBooks(ctx context.Context, query string, limit int) ([]Bo
 		}
 	}
 	return res, nil
-}
-
-// UserBookByID returns one shelf entry with its reads.
-// (user_books_by_pk returned null on the live API, so we filter by id.)
-func (c *Client) UserBookByID(ctx context.Context, id int) (*UserBook, error) {
-	var r struct {
-		UBs []UserBook `json:"user_books"`
-	}
-	q := `query ($id: Int!) { user_books(where: {id: {_eq: $id}}, limit: 1) {` + userBookFields + `} }`
-	if err := c.Do(ctx, q, map[string]any{"id": id}, &r); err != nil {
-		return nil, err
-	}
-	if len(r.UBs) == 0 {
-		return nil, fmt.Errorf("hardcover: user_book %d not found", id)
-	}
-	return &r.UBs[0], nil
 }
 
 type userBookResult struct {

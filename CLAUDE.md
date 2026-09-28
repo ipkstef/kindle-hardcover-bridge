@@ -92,9 +92,10 @@ highlights+notes → private journal (`internal/clippings`, `ClipSync`).
 Daemon ran on device (finish + clips OK; double-finish bug fixed). Rating
 found in `/mnt/us/system/fmcache/fmcache.db` (`goodreads_book_ratings`,
 emptied on sleep) → `RateSync` built and **works on device**. Goodreads shelf
-choice: mapping built (format UNVERIFIED; all goodreads/dialog/end-action
-records are logged as `research:`). "Rating Error" dialog: daemon logs dialog
-state after a tap (read-only); hiding it needs a user decision (constraint).
+choice: `goodreads_autoshelvings` (`kindle_asin`, `shelf_status`) mapped.
+API calls cut (match cache `bookmap.json`, one shelf lookup, cached `me`,
+rate limiter + 429 retry). **User: lock down core first**; later items (SQLite
+state DB, Rating Error dialog B+C) are in `docs/roadmap.md` "Later".
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

@@ -38,9 +38,13 @@ type Result struct {
 	Via       string // the identifier or title used
 }
 
+// Library loads the user's shelves. It is called only when the waterfall
+// reaches the library step (it downloads the whole library).
+type Library func(ctx context.Context) ([]hardcover.UserBook, error)
+
 // Resolve runs the waterfall. steps gets one line per attempt (for the log).
 // It returns (nil, steps, nil) when nothing matches confidently.
-func Resolve(ctx context.Context, cat Catalog, id book.Identity, library []hardcover.UserBook) (*Result, []string, error) {
+func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Library) (*Result, []string, error) {
 	var steps []string
 	logf := func(f string, a ...any) { steps = append(steps, fmt.Sprintf(f, a...)) }
 
@@ -103,6 +107,17 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, library []hardc
 	}
 
 	// 3: the user's own library.
+	var library []hardcover.UserBook
+	if loadLibrary != nil {
+		lib, err := loadLibrary(ctx)
+		if errors.Is(err, hardcover.ErrUnauthorized) {
+			return nil, steps, err
+		}
+		if err != nil {
+			logf("library: error: %v", err)
+		}
+		library = lib
+	}
 	cands := make([]book.Candidate, len(library))
 	for i := range library {
 		cands[i] = book.Candidate{Title: library[i].Book.Title, Authors: library[i].Authors()}

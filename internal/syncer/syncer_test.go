@@ -43,7 +43,8 @@ func (f *fakeHC) client(t *testing.T) *hardcover.Client {
 	}))
 	t.Cleanup(srv.Close)
 	return &hardcover.Client{HTTP: srv.Client(), Endpoint: srv.URL,
-		Token: func(context.Context) (string, error) { return "tok", nil }}
+		Token: func(context.Context) (string, error) { return "tok", nil },
+		Sleep: func(context.Context, time.Duration) error { return nil }}
 }
 
 const ubJSON = `{"id":9,"book_id":500,"status_id":%d,"edition":{"id":33,"pages":400},

@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/metrics"
 )
 
@@ -140,7 +141,7 @@ func (r *RateSync) send(ctx context.Context, x metrics.Rating) error {
 		r.S.logf("ratings: book %s not in cc.db, dropped", short8(x.BookKey))
 		return nil
 	}
-	_, ub, err := r.S.Identify(ctx, local)
+	res, ub, err := r.S.Identify(ctx, local)
 	if errors.Is(err, ErrNotFound) {
 		r.S.logf("ratings: %q not found on Hardcover, dropped", local.Title)
 		return nil
@@ -149,12 +150,15 @@ func (r *RateSync) send(ctx context.Context, x metrics.Rating) error {
 		return err
 	}
 	if ub == nil {
-		// Not on the shelves yet: a normal sync adds it (and finishes it
-		// at the end of the book), then rate it.
-		if _, err := r.S.Sync(ctx, local); err != nil {
-			return err
-		}
-		if _, ub, err = r.S.Identify(ctx, local); err != nil {
+		// Not on the shelves yet: a rated book is usually finished, so
+		// finish it (adds it too); else add it as Currently Reading.
+		if IsFinished(local.Percent, local.ReadState) {
+			_, nub, err := r.S.finish(ctx, local, res, nil)
+			if err != nil {
+				return err
+			}
+			ub = nub
+		} else if ub, err = r.S.addUserBook(ctx, res, hardcover.StatusReading); err != nil {
 			return err
 		}
 		if ub == nil {
@@ -186,7 +190,7 @@ func (r *RateSync) sendShelf(ctx context.Context, key string, status int) error 
 		return err
 	}
 	if status == metrics.ShelfRead {
-		out, err := r.S.finish(ctx, local, res, ub)
+		out, _, err := r.S.finish(ctx, local, res, ub)
 		if err == nil {
 			r.S.logf("shelf: %q → Read (%v)", local.Title, out.Kind)
 		}

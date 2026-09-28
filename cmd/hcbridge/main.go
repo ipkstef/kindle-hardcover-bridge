@@ -48,6 +48,9 @@ type app struct {
 	scope    string
 	stateDir string
 	logPath  string
+
+	hc *hardcover.Client // one per process: rate limiter + cached "me"
+	sy *syncer.Syncer
 }
 
 func main() {
@@ -163,7 +166,11 @@ func (a *app) whoami(ctx context.Context) error {
 }
 
 func (a *app) syncer() *syncer.Syncer {
-	return &syncer.Syncer{C: a.client(), Logf: log.Printf}
+	if a.sy == nil {
+		a.sy = &syncer.Syncer{C: a.client(), Logf: log.Printf,
+			Cache: &syncer.BookCache{Path: filepath.Join(a.stateDir, "bookmap.json")}}
+	}
+	return a.sy
 }
 
 func (a *app) identify(ctx context.Context) error {
@@ -248,8 +255,16 @@ func (a *app) saveLog() error {
 	return nil
 }
 
-// client returns a GraphQL client that refreshes the token when needed.
+// client returns the GraphQL client (one per process). It refreshes the
+// token when needed.
 func (a *app) client() *hardcover.Client {
+	if a.hc == nil {
+		a.hc = a.newClient()
+	}
+	return a.hc
+}
+
+func (a *app) newClient() *hardcover.Client {
 	return &hardcover.Client{
 		HTTP:     a.oauth.HTTP,
 		Endpoint: hardcover.GraphQLEndpoint,

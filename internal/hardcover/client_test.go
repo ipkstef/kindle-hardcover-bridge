@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testClient(t *testing.T, h http.HandlerFunc) *Client {
@@ -70,5 +71,35 @@ func TestUpdateReadError(t *testing.T) {
 	})
 	if _, err := c.UpdateReadProgress(context.Background(), 1, 10, nil, nil); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRetry429AndMeCache(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			// Body as seen on the device (2026-09-28).
+			w.WriteHeader(429)
+			w.Write([]byte(`{"error":"Too Many Requests","message":"API rate limit exceeded for tier 'Free'. Try again in 1 seconds."}`))
+			return
+		}
+		w.Write([]byte(`{"data":{"me":[{"id":7,"username":"u"}]}}`))
+	}))
+	defer srv.Close()
+	var slept []time.Duration
+	c := &Client{HTTP: srv.Client(), Endpoint: srv.URL,
+		Token: func(context.Context) (string, error) { return "tok", nil },
+		Sleep: func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }}
+	me, err := c.Me(context.Background())
+	if err != nil || me.ID != 7 || calls != 2 {
+		t.Fatalf("me %+v err %v calls %d", me, err, calls)
+	}
+	if len(slept) != 1 || slept[0] != 2*time.Second {
+		t.Fatalf("slept %v", slept)
+	}
+	// Cached: no new request.
+	if _, err := c.Me(context.Background()); err != nil || calls != 2 {
+		t.Fatalf("cache miss: calls %d", calls)
 	}
 }

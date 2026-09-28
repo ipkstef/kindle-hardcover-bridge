@@ -98,3 +98,14 @@ Proposed rule (**to confirm with a test**):
 - Autostart after reboot: an upstart job in `/etc/upstart/` (needs rootfs
   write; likely lost on firmware update → tap `Hardcover.sh` again).
   **UNVERIFIED** on this device.
+
+## Later (user decision: core first)
+- **Local SQLite database** for daemon state (`/var/local/hcbridge/hcbridge.db`):
+  match cache, progress snapshot, pending retries, sent clippings, ratings.
+  Gains: atomic updates (safe on crash / battery off), indexed lookups as
+  the sent-clippings list grows, one file instead of several JSON files.
+  No size gain (state is a few KB). The SQLite driver is already in the
+  binary (used for cc.db). Today: JSON files in `/var/local/hcbridge/`.
+- **Rating Error dialog (approved: B + C):** close the stock error dialog
+  after a star tap (window manager, format UNVERIFIED), then show a short
+  "Saved to Hardcover" message. Dialog state research is in the daemon log.

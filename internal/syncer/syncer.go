@@ -48,10 +48,11 @@ type Outcome struct {
 	Finished bool   // the book was marked Read on Hardcover
 }
 
-// Syncer holds the Hardcover client and a logger.
+// Syncer holds the Hardcover client, the match cache and a logger.
 type Syncer struct {
-	C    *hardcover.Client
-	Logf func(format string, a ...any)
+	C     *hardcover.Client
+	Cache *BookCache // optional
+	Logf  func(format string, a ...any)
 }
 
 func (s *Syncer) logf(f string, a ...any) {
@@ -79,6 +80,35 @@ func StatusName(id int) string {
 // user's shelf entry, or nil if the book is not on the user's shelves.
 // It returns ErrNotFound when nothing matches.
 func (s *Syncer) Identify(ctx context.Context, local *book.Local) (*match.Result, *hardcover.UserBook, error) {
+	res, err := s.Resolve(ctx, local)
+	if err != nil {
+		return nil, nil, err
+	}
+	me, err := s.C.Me(ctx) // cached
+	if err != nil {
+		return nil, nil, err
+	}
+	ub, err := s.C.UserBookForBook(ctx, me.ID, res.BookID)
+	if err != nil {
+		return nil, nil, err
+	}
+	shelf := "not on your shelves"
+	if ub != nil {
+		shelf = StatusName(ub.StatusID)
+	}
+	s.logf("identify: %q → book %d via %s, %s", local.Title, res.BookID, res.Method, shelf)
+	return res, ub, nil
+}
+
+// Resolve finds the Hardcover book: from the match cache, else with the
+// match waterfall (then cached). No shelf lookup.
+func (s *Syncer) Resolve(ctx context.Context, local *book.Local) (*match.Result, error) {
+	if s.Cache != nil && local.Key != "" {
+		if m, ok := s.Cache.Get(local.Key); ok {
+			return &match.Result{BookID: m.BookID, EditionID: m.EditionID, Pages: m.Pages,
+				Title: m.Title, Method: "cache (" + m.Method + ")"}, nil
+		}
+	}
 	var meta *mobi.Meta
 	if !strings.Contains(local.MimeType, "kfx") {
 		m, err := mobi.ReadFile(local.Path)
@@ -88,46 +118,34 @@ func (s *Syncer) Identify(ctx context.Context, local *book.Local) (*match.Result
 		meta = m
 	}
 	id := book.BuildIdentity(*local, meta)
-	s.logf("identify: local %q by %v, %.2f%%, year %d", local.Title, local.Authors, local.Percent, id.Year)
+	s.logf("identify: local %q by %v, year %d", local.Title, local.Authors, id.Year)
 	for _, x := range id.IDs {
 		s.logf("identify: id %s %s from %s (dedicated %v)", x.Kind, x.Value, x.Source, x.Dedicated)
 	}
-
-	me, err := s.C.Me(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	lib, err := s.C.Library(ctx, me.ID)
-	if errors.Is(err, hardcover.ErrUnauthorized) {
-		return nil, nil, err
-	}
-	if err != nil {
-		// Not fatal: IDs and search still work without the library step.
-		s.logf("identify: library query failed: %v", err)
+	lib := func(ctx context.Context) ([]hardcover.UserBook, error) {
+		me, err := s.C.Me(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return s.C.Library(ctx, me.ID)
 	}
 	res, steps, err := match.Resolve(ctx, s.C, id, lib)
 	for _, st := range steps {
 		s.logf("identify: %s", st)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if res == nil {
-		return nil, nil, ErrNotFound
+		return nil, ErrNotFound
 	}
-	var ub *hardcover.UserBook
-	for i := range lib {
-		if lib[i].BookID == res.BookID {
-			ub = &lib[i]
-			break
+	if s.Cache != nil && local.Key != "" {
+		if err := s.Cache.Put(local.Key, BookMap{BookID: res.BookID, EditionID: res.EditionID,
+			Pages: res.Pages, Title: res.Title, Method: res.Method}); err != nil {
+			s.logf("identify: cache: %v", err)
 		}
 	}
-	shelf := "not on your shelves"
-	if ub != nil {
-		shelf = StatusName(ub.StatusID)
-	}
-	s.logf("identify: result book %d %q via %s (%s), %s", res.BookID, res.Title, res.Method, res.Via, shelf)
-	return res, ub, nil
+	return res, nil
 }
 
 // Sync sends the book's progress. Rules:
@@ -172,7 +190,8 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 		return Outcome{}, err
 	}
 	if finished {
-		return s.finish(ctx, local, res, ub)
+		out, _, err := s.finish(ctx, local, res, ub)
+		return out, err
 	}
 
 	added := ""
@@ -194,15 +213,8 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 	case ub.StatusID != hardcover.StatusReading:
 		return skip(res.Title, "shelf is "+StatusName(ub.StatusID)+" (re-read: not built yet)")
 	}
-	if added != "" {
-		// Hardcover creates a read on status change (seen 2026-09-28).
-		// Re-read the entry so we update that read and do not add a second.
-		if fresh, err := s.C.UserBookByID(ctx, ub.ID); err != nil {
-			s.logf("sync: re-read user_book %d: %v", ub.ID, err)
-		} else {
-			ub = fresh
-		}
-	}
+	// After an add or status change, the returned entry already holds the
+	// read Hardcover created (seen 2026-09-28), so no extra lookup is needed.
 
 	pages, editionID := ub.Pages()
 	if pages <= 0 && res.Pages > 0 {
@@ -274,41 +286,39 @@ func (s *Syncer) addUserBook(ctx context.Context, res *match.Result, status int)
 // finish marks the book Read. Order (hardcover-features.md): finish the open
 // read (last page + finished_at), then set status Read, so Hardcover does not
 // add a second, empty finished read.
-func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Result, ub *hardcover.UserBook) (Outcome, error) {
+func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Result, ub *hardcover.UserBook) (Outcome, *hardcover.UserBook, error) {
 	today := time.Now().Format("2006-01-02")
 	out := Outcome{Kind: Sent, Title: res.Title, Finished: true}
 	switch {
 	case ub != nil && ub.StatusID == hardcover.StatusRead:
 		s.logf("sync: already Read on Hardcover")
-		return Outcome{Kind: Unchanged, Title: res.Title, Finished: true}, nil
+		return Outcome{Kind: Unchanged, Title: res.Title, Finished: true}, ub, nil
 	case ub != nil && (ub.StatusID == hardcover.StatusDNF || ub.StatusID == hardcover.StatusIgnored):
 		s.logf("sync: not sent: shelf is %s", StatusName(ub.StatusID))
-		return Outcome{Kind: Skipped, Title: res.Title, Reason: "shelf is " + StatusName(ub.StatusID)}, nil
+		return Outcome{Kind: Skipped, Title: res.Title, Reason: "shelf is " + StatusName(ub.StatusID)}, ub, nil
 	case ub == nil:
 		// Not on the shelves: add as Currently Reading first (creates a read),
 		// then finish it below like any other book.
 		nub, err := s.addUserBook(ctx, res, hardcover.StatusReading)
 		if err != nil {
-			return Outcome{}, err
+			return Outcome{}, nil, err
 		}
 		s.logf("sync: auto-added book %d (user_book %d) to finish it", res.BookID, nub.ID)
 		ub, out.Added = nub, "added"
-	}
-	if fresh, err := s.C.UserBookByID(ctx, ub.ID); err == nil {
-		ub = fresh
 	}
 	// Already finished today (e.g. Hardcover moved the status back, or a
 	// retry): only set the status, never add a second finished read.
 	for _, r := range ub.Reads {
 		if r.FinishedAt != nil && *r.FinishedAt == today {
 			if ub.StatusID != hardcover.StatusRead {
-				if _, err := s.C.SetStatus(ctx, ub.ID, hardcover.StatusRead); err != nil {
-					return Outcome{}, err
+				nub, err := s.C.SetStatus(ctx, ub.ID, hardcover.StatusRead)
+				if err != nil {
+					return Outcome{}, nil, err
 				}
 				s.logf("sync: read %d already finished today; status set to Read", r.ID)
-				return out, nil
+				return out, nub, nil
 			}
-			return Outcome{Kind: Unchanged, Title: res.Title, Finished: true}, nil
+			return Outcome{Kind: Unchanged, Title: res.Title, Finished: true}, ub, nil
 		}
 	}
 	pages, editionID := ub.Pages()
@@ -319,7 +329,7 @@ func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Resul
 	if read == nil {
 		r, err := s.C.InsertRead(ctx, ub.ID, pages, editionID, today)
 		if err != nil {
-			return Outcome{}, err
+			return Outcome{}, nil, err
 		}
 		read = r
 	}
@@ -327,10 +337,11 @@ func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Resul
 		editionID = read.EditionID
 	}
 	if _, err := s.C.FinishRead(ctx, read.ID, pages, editionID, read.StartedAt, today); err != nil {
-		return Outcome{}, err
+		return Outcome{}, nil, err
 	}
-	if _, err := s.C.SetStatus(ctx, ub.ID, hardcover.StatusRead); err != nil {
-		return Outcome{}, err
+	nub, err := s.C.SetStatus(ctx, ub.ID, hardcover.StatusRead)
+	if err != nil {
+		return Outcome{}, nil, err
 	}
 	s.logf("sync: finished read %d (page %d/%d, %s), status Read (Kindle %.2f%%, read state %d)",
 		read.ID, pages, pages, today, local.Percent, local.ReadState)
@@ -338,5 +349,5 @@ func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Resul
 	if ub.Book.Title != "" {
 		out.Title = ub.Book.Title
 	}
-	return out, nil
+	return out, nub, nil
 }

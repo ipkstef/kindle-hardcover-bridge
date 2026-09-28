@@ -256,3 +256,17 @@ hard constraint "do not modify the reader". Candidate LIPC hooks (from
 `com.lab126.pillow pillowAlert` / `customDialog` / `dismissChrome`.
 Daemon now logs `activeDialogCount` + `getActiveAppTitle` for 20 s after a
 tap (read-only research).
+
+## Shelf choice + dialog state (2026-09-28, 06:03–06:06 UTC)
+- Goodreads shelf choice in "Before you go…" → fmcache record
+  `goodreads_autoshelvings`:
+  `{"action_id":"PerformManualShelving","context":"end_actions","event_type":"ManualShelving","kindle_asin":"<p_cdeKey>","shelf_status":"currently-reading",...,"widget_invoked_by":"InvokedByBookFinish"}`.
+  Values seen: `currently-reading`, `to-read`. (Key is `kindle_asin`, not
+  `book_asin` → first mapping missed it; fixed.)
+- `com.lab126.winmgr activeDialogCount`: 1 with "Before you go…" open,
+  2 while the "Rating Error" is shown, 3 with the shelf list open. Active
+  app stays `com.lab126.booklet.reader`.
+- **HTTP 429** (free tier) during one rating: ~15 API calls in ~1 s.
+  Fixed: match cache (`bookmap.json`), one shelf-entry lookup instead of the
+  whole library, cached `me`, no re-reads, rate limiter (burst 5, 0.9/s),
+  retry after 429. Rating on a known book = 2 calls.

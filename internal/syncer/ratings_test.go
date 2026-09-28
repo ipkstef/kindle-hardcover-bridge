@@ -82,3 +82,33 @@ func TestShelfChoiceSent(t *testing.T) {
 		t.Fatalf("status %v, ops %v", status, f.ops)
 	}
 }
+
+// A rating on a known book: 1 shelf lookup + 1 rating (+ "me" once per run).
+// Device log 2026-09-28 had ~15 calls and hit HTTP 429.
+func TestRatingCallCount(t *testing.T) {
+	dir := t.TempDir()
+	fm := filepath.Join(dir, "fmcache.db")
+	db, _ := sql.Open("sqlite", fm)
+	db.Exec(`CREATE TABLE records (id INTEGER PRIMARY KEY, schema_name TEXT, created_timestamp INTEGER, record TEXT)`)
+	db.Exec(`INSERT INTO records VALUES (1,'goodreads_book_ratings',1000,'{"action_id":"write_rating","book_asin":"k","rating":"4"}')`)
+	f := newFake(3)
+	cache := &BookCache{Path: filepath.Join(dir, "bookmap.json")}
+	cache.Put("k", BookMap{BookID: 500, Title: "Red Rising", Method: "isbn13"})
+	rs := &RateSync{S: &Syncer{C: f.client(t), Cache: cache, Logf: t.Logf}, Books: fakeBooks{},
+		Path: fm, StatePath: filepath.Join(dir, "ratings.json")}
+	if n, err := rs.Run(context.Background()); err != nil || n != 1 {
+		t.Fatalf("got %d %v", n, err)
+	}
+	if len(f.ops) != 3 { // me, user_book, update
+		t.Fatalf("first rating: %d calls %v", len(f.ops), f.ops)
+	}
+	db.Exec(`INSERT INTO records VALUES (2,'goodreads_book_ratings',2000,'{"action_id":"write_rating","book_asin":"k","rating":"5"}')`)
+	db.Close()
+	f.ops, f.vars = nil, nil
+	if n, err := rs.Run(context.Background()); err != nil || n != 1 {
+		t.Fatalf("got %d %v", n, err)
+	}
+	if len(f.ops) != 2 { // user_book, update ("me" cached)
+		t.Fatalf("second rating: %d calls %v", len(f.ops), f.ops)
+	}
+}
