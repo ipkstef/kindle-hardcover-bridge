@@ -1,0 +1,224 @@
+package syncer
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/clippings"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/mobi"
+)
+
+// Books is the part of the cc.db reader the clip sync needs.
+type Books interface {
+	BooksByTitle(ctx context.Context, title string) ([]*book.Local, error)
+}
+
+// ClipState is saved between runs.
+type ClipState struct {
+	Baseline bool           `json:"baseline"` // existing clippings were recorded
+	Sent     map[string]int `json:"sent"`     // clip ID → journal ID (0 = baseline, not sent)
+	Size     int64          `json:"size"`
+	ModTime  time.Time      `json:"mod_time"`
+}
+
+// ClipSync sends Kindle highlights as private quotes and notes as private
+// notes to the Hardcover reading journal (user decision 2026-09-28).
+type ClipSync struct {
+	S         *Syncer
+	Books     Books
+	Path      string // My Clippings.txt
+	StatePath string
+}
+
+// Run sends new clippings. With all=true, clippings recorded as baseline are
+// sent too (import of old highlights). It does nothing if the file did not
+// change since the last complete run.
+func (c *ClipSync) Run(ctx context.Context, all bool) (sent int, err error) {
+	fi, err := os.Stat(c.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err // e.g. /mnt/us not mounted (USB mode): retry later
+	}
+	st := c.load()
+	if !all && st.Baseline && fi.Size() == st.Size && fi.ModTime().Equal(st.ModTime) {
+		return 0, nil
+	}
+	f, err := os.Open(c.Path)
+	if err != nil {
+		return 0, err
+	}
+	clips, err := clippings.Parse(f)
+	f.Close()
+	if err != nil {
+		return 0, err
+	}
+
+	if !st.Baseline && !all {
+		for _, cl := range clips {
+			st.Sent[cl.ID()] = 0
+		}
+		st.Baseline, st.Size, st.ModTime = true, fi.Size(), fi.ModTime()
+		c.S.logf("clips: first run, %d existing clippings recorded, not sent (use import to send them)", len(clips))
+		return 0, c.save(st)
+	}
+
+	type key struct{ title, author string }
+	groups := map[key][]clippings.Clip{}
+	var order []key
+	for _, cl := range clips {
+		if cl.Kind != clippings.Highlight && cl.Kind != clippings.Note {
+			continue
+		}
+		if jid, done := st.Sent[cl.ID()]; done && (jid != 0 || !all) {
+			continue
+		}
+		k := key{cl.Title, cl.Author}
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], cl)
+	}
+
+	complete := true
+	for _, k := range order {
+		n, err := c.sendBook(ctx, k.title, k.author, groups[k], st)
+		sent += n
+		if err != nil {
+			return sent, err
+		}
+		if n < len(groups[k]) {
+			complete = false
+		}
+	}
+	st.Baseline = true
+	if complete {
+		st.Size, st.ModTime = fi.Size(), fi.ModTime()
+	}
+	return sent, c.save(st)
+}
+
+// sendBook sends one book's clippings. Clips of books that cannot be found
+// stay unsent and are tried again when the file changes.
+func (c *ClipSync) sendBook(ctx context.Context, title, author string, clips []clippings.Clip, st *ClipState) (int, error) {
+	local := c.findLocal(ctx, title, author)
+	if local == nil {
+		c.S.logf("clips: %q: book not found in cc.db, %d clippings kept for later", title, len(clips))
+		return 0, nil
+	}
+	res, ub, err := c.S.Identify(ctx, local)
+	if errors.Is(err, ErrNotFound) {
+		c.S.logf("clips: %q: not found on Hardcover, %d clippings kept for later", title, len(clips))
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	pages, editionID := res.Pages, res.EditionID
+	if ub != nil {
+		if p, e := ub.Pages(); p > 0 {
+			pages, editionID = p, e
+		}
+	}
+	var textLen int64
+	if !strings.Contains(local.MimeType, "kfx") {
+		if m, err := mobi.ReadFile(local.Path); err == nil {
+			textLen = m.TextLength
+		}
+	}
+
+	n := 0
+	for _, cl := range clips {
+		if strings.TrimSpace(cl.Text) == "" {
+			st.Sent[cl.ID()] = -1 // nothing to send
+			n++
+			continue
+		}
+		e := hardcover.JournalEntry{
+			BookID: res.BookID, EditionID: editionID, Entry: cl.Text,
+			PrivacyID: hardcover.PrivacyPrivate, Event: "quote",
+		}
+		if cl.Kind == clippings.Note {
+			e.Event = "note"
+		}
+		if !cl.Added.IsZero() {
+			e.ActionAt = cl.Added.Format("2006-01-02")
+		}
+		if page := locationToPage(cl.LocStart, textLen, pages); page > 0 {
+			e.Metadata = map[string]any{"position": map[string]any{"type": "pages", "value": page, "possible": pages}}
+		}
+		jid, err := c.S.C.InsertJournal(ctx, e)
+		if err != nil {
+			return n, err
+		}
+		st.Sent[cl.ID()] = jid
+		n++
+		c.S.logf("clips: %q: %s at location %d → private journal %d", res.Title, e.Event, cl.LocStart, jid)
+		if err := c.save(st); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+func (c *ClipSync) findLocal(ctx context.Context, title, author string) *book.Local {
+	books, err := c.Books.BooksByTitle(ctx, title)
+	if err != nil || len(books) == 0 {
+		return nil
+	}
+	if author != "" {
+		for _, b := range books {
+			for _, a := range b.Authors {
+				if book.NormName(a) == book.NormName(author) {
+					return b
+				}
+			}
+		}
+	}
+	return books[0]
+}
+
+// locationToPage maps a Kindle location to a page of the Hardcover edition.
+// MOBI/AZW3: location ≈ text position / 150 (common rule, UNVERIFIED on the
+// device). Returns 0 when it cannot be computed.
+func locationToPage(loc int, textLen int64, pages int) int {
+	if loc <= 0 || textLen <= 0 || pages <= 0 {
+		return 0
+	}
+	pct := float64(loc) * 150 / float64(textLen) * 100
+	return book.PercentToPage(min(pct, 100), pages)
+}
+
+func (c *ClipSync) load() *ClipState {
+	st := &ClipState{}
+	if b, err := os.ReadFile(c.StatePath); err == nil {
+		_ = json.Unmarshal(b, st)
+	}
+	if st.Sent == nil {
+		st.Sent = map[string]int{}
+	}
+	return st
+}
+
+func (c *ClipSync) save(st *ClipState) error {
+	b, err := json.MarshalIndent(st, "", " ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(c.StatePath), 0o700); err != nil {
+		return err
+	}
+	tmp := c.StatePath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, c.StatePath)
+}

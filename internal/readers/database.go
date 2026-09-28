@@ -51,6 +51,35 @@ func (d *Database) BookByKey(ctx context.Context, key string) (*book.Local, erro
 		AND p_cdeKey = ? ORDER BY p_lastAccess DESC LIMIT 1`, key)
 }
 
+// BooksByTitle returns books with exactly this title (latest access first).
+func (d *Database) BooksByTitle(ctx context.Context, title string) ([]*book.Local, error) {
+	db, err := d.open()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT p_cdeKey FROM Entries WHERE `+bookFilter+`
+		AND p_titles_0_nominal = ? ORDER BY p_lastAccess DESC`, title)
+	if err != nil {
+		return nil, fmt.Errorf("cc.db: %w", err)
+	}
+	var keys []string
+	for rows.Next() {
+		var k sql.NullString
+		if rows.Scan(&k) == nil && k.Valid {
+			keys = append(keys, k.String)
+		}
+	}
+	rows.Close()
+	var out []*book.Local
+	for _, k := range keys {
+		if b, err := d.BookByKey(ctx, k); err == nil {
+			out = append(out, b)
+		}
+	}
+	return out, nil
+}
+
 // Progress is one book's reading state.
 type Progress struct {
 	Percent    float64 `json:"percent"`

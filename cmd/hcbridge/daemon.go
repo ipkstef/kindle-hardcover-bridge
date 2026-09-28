@@ -110,7 +110,15 @@ func (a *app) daemon(ctx context.Context) error {
 	}
 	log.Printf("daemon: started, pid %d (%s)", os.Getpid(), strings.Join(caps, ", "))
 
-	d := &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), Logf: log.Printf}
+	clips := a.clipSync()
+	d := &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), Logf: log.Printf,
+		After: func(ctx context.Context) {
+			if n, err := clips.Run(ctx, false); err != nil {
+				log.Printf("daemon: clips: %v (retry at next check)", err)
+			} else if n > 0 {
+				log.Printf("daemon: clips: %d sent", n)
+			}
+		}}
 	scan := func(why string) {
 		sctx, scancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer scancel()

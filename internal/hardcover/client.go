@@ -500,3 +500,58 @@ func (c *Client) DefaultEdition(ctx context.Context, bookID int) (*Edition, erro
 	}
 	return nil, nil
 }
+
+// Journal privacy IDs (hardcover-docs ReadingJournals.mdx).
+const (
+	PrivacyPublic    = 1
+	PrivacyFollowers = 2
+	PrivacyPrivate   = 3
+)
+
+// JournalEntry is a reading journal entry (note, quote, ...).
+type JournalEntry struct {
+	BookID    int
+	EditionID *int
+	Event     string // "note", "quote"
+	Entry     string
+	PrivacyID int
+	ActionAt  string         // date, "2006-01-02"
+	Metadata  map[string]any // e.g. {"position":{"type":"pages","value":44,"possible":400}}
+}
+
+// InsertJournal adds a reading journal entry and returns its id.
+// Scope: write:library.
+func (c *Client) InsertJournal(ctx context.Context, e JournalEntry) (int, error) {
+	obj := map[string]any{
+		"book_id": e.BookID, "event": e.Event, "entry": e.Entry,
+		"privacy_setting_id": e.PrivacyID, "tags": []any{},
+	}
+	if e.EditionID != nil {
+		obj["edition_id"] = *e.EditionID
+	}
+	if e.ActionAt != "" {
+		obj["action_at"] = e.ActionAt
+	}
+	if e.Metadata != nil {
+		obj["metadata"] = e.Metadata
+	}
+	var r struct {
+		R struct {
+			ID     *int     `json:"id"`
+			Errors []string `json:"errors"`
+		} `json:"insert_reading_journal"`
+	}
+	q := `mutation ($object: ReadingJournalCreateType!) {
+		insert_reading_journal(object: $object) { id errors }
+	}`
+	if err := c.Do(ctx, q, map[string]any{"object": obj}, &r); err != nil {
+		return 0, err
+	}
+	if len(r.R.Errors) > 0 {
+		return 0, fmt.Errorf("hardcover: %s", strings.Join(r.R.Errors, "; "))
+	}
+	if r.R.ID == nil {
+		return 0, errors.New("hardcover: no journal id in response")
+	}
+	return *r.R.ID, nil
+}

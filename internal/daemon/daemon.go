@@ -46,6 +46,8 @@ type Daemon struct {
 	StatePath   string
 	Logf        func(string, ...any)
 	MaxAttempts int // give up on one percent value after this many errors
+	// After runs at the end of each scan (e.g. highlight/note sync).
+	After func(ctx context.Context)
 
 	mu    sync.Mutex
 	state *State
@@ -176,7 +178,11 @@ func (d *Daemon) Scan(ctx context.Context) error {
 		d.Logf("daemon: %q: %s", local.Title, st.LastResult)
 	}
 	st.LastScan = time.Now()
-	return d.save()
+	err = d.save()
+	if d.After != nil && ctx.Err() == nil {
+		d.After(ctx)
+	}
+	return err
 }
 
 // Status returns a copy of the state (after at least one scan or load).

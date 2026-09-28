@@ -1,0 +1,99 @@
+package syncer
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
+)
+
+type fakeBooks struct{}
+
+func (fakeBooks) BooksByTitle(_ context.Context, title string) ([]*book.Local, error) {
+	if title != redRising.Title {
+		return nil, nil
+	}
+	l := redRising
+	return []*book.Local{&l}, nil
+}
+
+func TestClipSync(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "My Clippings.txt")
+	dev, err := os.ReadFile("../clippings/testdata/My Clippings.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(path, dev, 0o644)
+
+	f := newFake(2)
+	cs := &ClipSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
+		Path: path, StatePath: filepath.Join(dir, "clips.json")}
+
+	// First run: baseline only, nothing sent.
+	if n, err := cs.Run(context.Background(), false); err != nil || n != 0 || len(f.ops) != 0 {
+		t.Fatalf("baseline: %d %v %v", n, err, f.ops)
+	}
+	// A new highlight is added on the Kindle.
+	add := "\ufeffRed Rising (The Red Rising Trilogy, Book 1) (Pierce Brown)\r\n" +
+		"- Your Highlight on page 50 | Location 700-701 | Added on Tuesday, September 29, 2026 9:00:00 PM\r\n\r\nNew line.\r\n==========\r\n"
+	fh, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	fh.WriteString(add)
+	fh.Close()
+	os.Chtimes(path, time.Now(), time.Now().Add(time.Second))
+
+	n, err := cs.Run(context.Background(), false)
+	if err != nil || n != 1 {
+		t.Fatalf("new clip: %d %v", n, err)
+	}
+	var journal []map[string]any
+	for i, op := range f.ops {
+		if op == "insert_reading_journal" {
+			journal = append(journal, f.vars[i]["object"].(map[string]any))
+		}
+	}
+	if len(journal) != 1 {
+		t.Fatalf("journal calls %d", len(journal))
+	}
+	j := journal[0]
+	if j["event"] != "quote" || j["entry"] != "New line." || j["privacy_setting_id"] != float64(hardcover.PrivacyPrivate) ||
+		j["action_at"] != "2026-09-29" || j["book_id"] != float64(500) {
+		t.Errorf("entry %v", j)
+	}
+	// No change → no work.
+	f.ops, f.vars = nil, nil
+	if n, _ := cs.Run(context.Background(), false); n != 0 || len(f.ops) != 0 {
+		t.Fatalf("repeat: %d %v", n, f.ops)
+	}
+	// Import all: the 3 baseline clips (2 quotes + 1 note) are sent once.
+	n, err = cs.Run(context.Background(), true)
+	if err != nil || n != 3 {
+		t.Fatalf("import: %d %v", n, err)
+	}
+	notes := 0
+	for i, op := range f.ops {
+		if op == "insert_reading_journal" && f.vars[i]["object"].(map[string]any)["event"] == "note" {
+			notes++
+		}
+	}
+	if notes != 1 {
+		t.Errorf("notes %d", notes)
+	}
+	if n, _ := cs.Run(context.Background(), true); n != 0 {
+		t.Fatalf("second import sent %d", n)
+	}
+}
+
+func TestLocationToPage(t *testing.T) {
+	// Device: location 661 in a book of ~933800 chars ≈ 10.6 %.
+	if p := locationToPage(661, 933800, 401); p != 42 {
+		t.Errorf("page %d", p)
+	}
+	if p := locationToPage(661, 0, 401); p != 0 {
+		t.Errorf("no text length: %d", p)
+	}
+}

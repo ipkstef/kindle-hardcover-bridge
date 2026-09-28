@@ -6,6 +6,8 @@
 //	hcbridge status   show daemon state on screen
 //	hcbridge sync     send the current book's progress once
 //	hcbridge identify find the current book on Hardcover (no writes)
+//	hcbridge clips    send new highlights/notes (private journal entries)
+//	hcbridge clipsall send all highlights/notes, also old ones
 //	hcbridge savelog  copy the log to the USB drive
 //	hcbridge whoami   show the signed-in user
 //	hcbridge logout   delete the saved token
@@ -25,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/certs"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/clippings"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/config"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
@@ -55,7 +58,7 @@ func main() {
 	scope := fs.String("scope", hardcover.DefaultScope, "OAuth scopes")
 	row := fs.Int("row", 3, "first screen row for messages")
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: hcbridge login|daemon|stop|status|sync|identify|savelog|whoami|logout [flags]")
+		fmt.Fprintln(os.Stderr, "usage: hcbridge login|daemon|stop|status|sync|identify|clips|clipsall|savelog|whoami|logout [flags]")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
@@ -87,6 +90,8 @@ func main() {
 		err = a.identify(ctx)
 	case "sync":
 		err = a.syncNow(ctx)
+	case "clips", "clipsall":
+		err = a.clipsNow(ctx, cmd == "clipsall")
 	case "savelog":
 		err = a.saveLog()
 	case "whoami":
@@ -204,6 +209,21 @@ func (a *app) syncNow(ctx context.Context) error {
 		}
 		a.screen.Show(lines...)
 	}
+	return nil
+}
+
+func (a *app) clipSync() *syncer.ClipSync {
+	return &syncer.ClipSync{S: a.syncer(), Books: a.db, Path: clippings.DefaultPath,
+		StatePath: filepath.Join(a.stateDir, "clips.json")}
+}
+
+func (a *app) clipsNow(ctx context.Context, all bool) error {
+	a.screen.Show("Hardcover: sending highlights/notes...")
+	n, err := a.clipSync().Run(ctx, all)
+	if err != nil {
+		return err
+	}
+	a.screen.Show(fmt.Sprintf("Hardcover: %d highlights/notes sent", n), "(private journal entries)")
 	return nil
 }
 

@@ -29,7 +29,7 @@ func (f *fakeHC) client(t *testing.T) *hardcover.Client {
 			Variables map[string]any `json:"variables"`
 		}
 		json.Unmarshal(b, &req)
-		for _, op := range []string{"update_user_book_read", "insert_user_book_read", "update_user_book",
+		for _, op := range []string{"insert_reading_journal", "update_user_book_read", "insert_user_book_read", "update_user_book",
 			"insert_user_book", "user_books(where: {id", "user_books(where: {user_id", "me {", "editions(", "search("} {
 			if strings.Contains(req.Query, op) {
 				f.ops = append(f.ops, op)
@@ -52,11 +52,12 @@ const ubJSON = `{"id":9,"book_id":500,"status_id":%d,"edition":{"id":33,"pages":
 func newFake(status int) *fakeHC {
 	ub := strings.Replace(ubJSON, "%d", string(rune('0'+status)), 1)
 	return &fakeHC{reply: map[string]string{
-		"me {":                      `{"data":{"me":[{"id":1,"username":"u","account_privacy_setting_id":1}]}}`,
+		"me {":                       `{"data":{"me":[{"id":1,"username":"u","account_privacy_setting_id":1}]}}`,
 		"user_books(where: {user_id": `{"data":{"user_books":[` + ub + `]}}`,
 		"user_books(where: {id":      `{"data":{"user_books":[` + ub + `]}}`,
 		"update_user_book_read":      `{"data":{"update_user_book_read":{"error":null,"user_book_read":{"id":77}}}}`,
 		"update_user_book":           `{"data":{"update_user_book":{"error":null,"user_book":` + ub + `}}}`,
+		"insert_reading_journal":     `{"data":{"insert_reading_journal":{"id":555,"errors":null}}}`,
 	}}
 }
 
