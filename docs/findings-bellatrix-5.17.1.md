@@ -410,3 +410,9 @@ system log (`/var/log/messages`) names each window:
   (last name first). Fixed: "Last, First" names are turned around.
 - Miss cache works (second tap: no look-up). Clips (note, quote) sent.
 - Progress: Darth Bane moved Want to Read → Currently Reading, page 17.
+
+## Version b3b70fe on device (2026-09-28 18:21–18:25)
+- The Naturals ("Barnes, Jennifer Lynn") now found via library, 5 stars
+  saved in 1 s. Log counts "1 saved".
+- **Sleep inside a book** (no go-Home): scan `(sleep, …)` sent Darth Bane
+  6.11 % → page 25/418, then 11.06 % → page 46/418, ~5 s after sleep.
