@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/atomicfile"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/clippings"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
@@ -60,6 +60,12 @@ func (c *ClipSync) Run(ctx context.Context, all bool) (sent int, err error) {
 	f.Close()
 	if err != nil {
 		return 0, err
+	}
+
+	if migrateIDs(st, clips) {
+		if err := c.save(st); err != nil {
+			return 0, err
+		}
 	}
 
 	if !st.Baseline && !all {
@@ -180,6 +186,26 @@ func (c *ClipSync) sendBook(ctx context.Context, title, author string, clips []c
 	return n, nil
 }
 
+// migrateIDs moves entries of the sent list from the old, time-zone-based
+// clip ID to the new one. It reports if anything changed.
+func migrateIDs(st *ClipState, clips []clippings.Clip) bool {
+	changed := false
+	for _, cl := range clips {
+		old, id := cl.LegacyID(), cl.ID()
+		if old == id {
+			continue
+		}
+		if jid, ok := st.Sent[old]; ok {
+			if _, done := st.Sent[id]; !done {
+				st.Sent[id] = jid
+			}
+			delete(st.Sent, old)
+			changed = true
+		}
+	}
+	return changed
+}
+
 func (c *ClipSync) findLocal(ctx context.Context, title, author string) *book.Local {
 	books, err := c.Books.BooksByTitle(ctx, title)
 	if err != nil || len(books) == 0 {
@@ -220,18 +246,7 @@ func (c *ClipSync) load() *ClipState {
 }
 
 func (c *ClipSync) save(st *ClipState) error {
-	b, err := json.MarshalIndent(st, "", " ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(c.StatePath), 0o700); err != nil {
-		return err
-	}
-	tmp := c.StatePath + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, c.StatePath)
+	return atomicfile.WriteJSON(c.StatePath, st, 0o600)
 }
 
 // Note/highlight pairing. On the Kindle, a note on a highlight is saved as

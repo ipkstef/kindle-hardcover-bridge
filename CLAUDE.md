@@ -97,7 +97,12 @@ API calls cut (match cache `bookmap.json`, one shelf lookup, cached `me`,
 rate limiter + 429 retry). Version 3f83ac6 **works on device**: rating,
 shelf mapping, cache, no 429; Start replaces an old daemon. **User: lock down
 core first**; later items (SQLite state DB, Rating Error dialog B+C) are in
-`docs/roadmap.md` "Later". Open: re-read rule, autostart/no-KUAL install.
+`docs/roadmap.md` "Later". Re-read built (Currently Reading after a finish,
+or back under 5 %). Code review 2026-09-28: HIGH fixes done (deadlock,
+offline ≠ not found, no retry limit while offline, token refresh lock,
+subtitle-safe title match, forward-only shelf, zone-free clip IDs, one
+writer goroutine, fsync writes) — **not yet tested on device**.
+Open: autostart/no-KUAL install.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

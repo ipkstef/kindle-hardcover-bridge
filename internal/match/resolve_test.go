@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
@@ -20,6 +21,9 @@ func (f *fakeCat) EditionsBy(_ context.Context, field, value string) ([]hardcove
 	f.calls = append(f.calls, field+"="+value)
 	if field == "asin" && value == "B0ERRORERR" {
 		return nil, errors.New("field 'asin' not found")
+	}
+	if value == "offline" {
+		return nil, fmt.Errorf("%w: dial tcp: no route", hardcover.ErrTransient)
 	}
 	return f.editions[field+"="+value], nil
 }
@@ -132,5 +136,18 @@ func TestNoMatch(t *testing.T) {
 	r, steps, err := Resolve(context.Background(), &fakeCat{}, parade, nil)
 	if r != nil || err != nil || len(steps) == 0 {
 		t.Fatalf("got %+v %v %v", r, err, steps)
+	}
+}
+
+// No network: the waterfall stops with an error; it never falls through to
+// the library or returns "not found".
+func TestTransientStops(t *testing.T) {
+	cat := &fakeCat{}
+	id := withIDs(book.ID{Kind: book.KindASIN, Value: "offline", Source: "exth113", Dedicated: true})
+	libCalled := false
+	lib := func(context.Context) ([]hardcover.UserBook, error) { libCalled = true; return nil, nil }
+	r, _, err := Resolve(context.Background(), cat, id, lib)
+	if r != nil || !hardcover.IsTransient(err) || libCalled {
+		t.Fatalf("got %+v, %v, library called %v", r, err, libCalled)
 	}
 }

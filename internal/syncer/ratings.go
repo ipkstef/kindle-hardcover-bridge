@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/atomicfile"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/metrics"
@@ -42,7 +42,10 @@ type RateSync struct {
 	// OnReread is called when a shelf choice starts a re-read (daemon: clear
 	// its "finished" mark for the book).
 	OnReread func(key string)
-	mu       sync.Mutex
+
+	mu    sync.Mutex // guards st
+	st    *RateState
+	runMu sync.Mutex // one Run at a time
 }
 
 // researchSchemas are logged in full to learn their format (shelf choice,
@@ -57,12 +60,84 @@ var quietSchemas = map[string]bool{
 	"eink_end_actions_general":              true,
 }
 
-// Run copies new taps into the state, then sends pending ones.
-func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
+// Collect copies new taps and shelf choices from fmcache.db into the state.
+// It makes no network calls and never waits for a send, so the file watcher
+// can call it at once (the Kindle empties fmcache.db soon). It returns the
+// number of new items.
+func (r *RateSync) Collect(ctx context.Context) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	st := r.load()
+	return r.collect(ctx, r.state())
+}
 
+// Run collects new taps, then sends pending ones. Only the daemon's scan
+// loop calls Run, so Hardcover writes never overlap. The state lock is held
+// only for short changes, never during a network call.
+func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
+	r.runMu.Lock()
+	defer r.runMu.Unlock()
+	r.mu.Lock()
+	st := r.state()
+	_, err = r.collect(ctx, st)
+	shelves := make(map[string]int, len(st.Shelves))
+	for k, v := range st.Shelves {
+		shelves[k] = v
+	}
+	pending := make([]metrics.Rating, 0, len(st.Pending))
+	for _, x := range st.Pending {
+		pending = append(pending, x)
+	}
+	r.mu.Unlock()
+	if err != nil {
+		return 0, err
+	}
+	sort.Slice(pending, func(i, j int) bool { return pending[i].CreatedMS < pending[j].CreatedMS })
+
+	// done removes an item that was sent, unless a newer tap replaced it
+	// meanwhile, and saves.
+	done := func(drop func(*RateState)) error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		drop(r.st)
+		sent++
+		return r.save(r.st)
+	}
+	for k, status := range shelves {
+		if err := r.sendShelf(ctx, k, status); err != nil {
+			return sent, err
+		}
+		if err := done(func(st *RateState) {
+			if st.Shelves[k] == status {
+				delete(st.Shelves, k)
+			}
+		}); err != nil {
+			return sent, err
+		}
+	}
+	for _, x := range pending {
+		if err := r.sendRating(ctx, x); err != nil {
+			return sent, err // keep pending, retry later (e.g. no Wi-Fi)
+		}
+		if err := done(func(st *RateState) {
+			if st.Pending[x.BookKey].CreatedMS == x.CreatedMS {
+				delete(st.Pending, x.BookKey)
+			}
+		}); err != nil {
+			return sent, err
+		}
+	}
+	return sent, nil
+}
+
+// state returns the state, loaded once. The caller holds r.mu.
+func (r *RateSync) state() *RateState {
+	if r.st == nil {
+		r.st = r.load()
+	}
+	return r.st
+}
+
+func (r *RateSync) collect(ctx context.Context, st *RateState) (n int, err error) {
 	if _, err := os.Stat(r.Path); err == nil {
 		rs, err := metrics.Ratings(ctx, r.Path, st.LastMS)
 		if err != nil {
@@ -94,47 +169,21 @@ func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
 			}
 			if status, key, raw := metrics.ShelfChoice(x.JSON); status != metrics.ShelfNone && key != "" {
 				st.Shelves[key] = status
+				n++
 				r.S.logf("shelf: book %s → %q (Hardcover status %d)", short8(key), raw, status)
 			}
 		}
+		n += len(rs)
 		if len(rs) > 0 || len(other) > 0 {
 			if err := r.save(st); err != nil {
-				return 0, err
+				return n, err
 			}
 		}
 	}
-
-	for k, status := range st.Shelves {
-		if err := r.sendShelf(ctx, k, status); err != nil {
-			return sent, err
-		}
-		delete(st.Shelves, k)
-		sent++
-		if err := r.save(st); err != nil {
-			return sent, err
-		}
-	}
-
-	keys := make([]string, 0, len(st.Pending))
-	for k := range st.Pending {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool { return st.Pending[keys[i]].CreatedMS < st.Pending[keys[j]].CreatedMS })
-	for _, k := range keys {
-		x := st.Pending[k]
-		if err := r.send(ctx, x); err != nil {
-			return sent, err // keep pending, retry later (e.g. no Wi-Fi)
-		}
-		delete(st.Pending, k)
-		sent++
-		if err := r.save(st); err != nil {
-			return sent, err
-		}
-	}
-	return sent, nil
+	return n, nil
 }
 
-func (r *RateSync) send(ctx context.Context, x metrics.Rating) error {
+func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) error {
 	if x.Stars <= 0 || x.Stars > 5 {
 		r.S.logf("ratings: book %s: rating %.1f ignored", short8(x.BookKey), x.Stars)
 		return nil
@@ -210,15 +259,22 @@ func (r *RateSync) sendShelf(ctx context.Context, key string, status int) error 
 		r.S.logf("shelf: %q → Currently Reading (re-read)", local.Title)
 		return nil
 	}
+	// Forward only (like progress): Want to Read → Currently Reading is an
+	// upgrade; anything else that would move the book back, or override
+	// Paused / Did Not Finish, is not sent.
 	switch {
 	case ub == nil:
 		if _, err := r.S.addUserBook(ctx, res, status); err != nil {
 			return err
 		}
-	case ub.StatusID != status:
+	case ub.StatusID == status:
+	case status == hardcover.StatusReading && ub.StatusID == hardcover.StatusWantToRead:
 		if _, err := r.S.C.SetStatus(ctx, ub.ID, status); err != nil {
 			return err
 		}
+	default:
+		r.S.logf("shelf: %q: %s → %s not sent (forward only)", local.Title, StatusName(ub.StatusID), StatusName(status))
+		return nil
 	}
 	r.S.logf("shelf: %q → %s", local.Title, StatusName(status))
 	return nil
@@ -246,16 +302,5 @@ func (r *RateSync) load() *RateState {
 }
 
 func (r *RateSync) save(st *RateState) error {
-	b, err := json.MarshalIndent(st, "", " ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(r.StatePath), 0o700); err != nil {
-		return err
-	}
-	tmp := r.StatePath + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, r.StatePath)
+	return atomicfile.WriteJSON(r.StatePath, st, 0o600)
 }

@@ -6,7 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/atomicfile"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 )
 
@@ -58,18 +60,25 @@ func (s *TokenStore) Load() (*hardcover.Token, error) {
 
 // Save writes the token atomically.
 func (s *TokenStore) Save(t *hardcover.Token) error {
+	return atomicfile.WriteJSON(s.Path, t, 0o600)
+}
+
+// Lock takes an exclusive lock shared by all hcbridge processes (the daemon
+// and menu commands), so only one of them refreshes the token at a time.
+// It waits until the lock is free. Call unlock when done.
+func (s *TokenStore) Lock() (unlock func(), err error) {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
-		return err
+		return nil, err
 	}
-	b, err := json.MarshalIndent(t, "", "  ")
+	f, err := os.OpenFile(s.Path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	tmp := s.Path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
 	}
-	return os.Rename(tmp, s.Path)
+	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
 }
 
 // Delete removes the token (sign out).

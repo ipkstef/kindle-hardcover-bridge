@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/config"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/match"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/mobi"
@@ -32,6 +33,13 @@ func IsFinished(pct float64, readState int) bool {
 
 // ErrNotFound means the waterfall found no confident match.
 var ErrNotFound = errors.New("book not found on Hardcover")
+
+// Waiting reports errors that say nothing about the book: no network, a
+// server problem, or no valid sign-in. Work that failed with them is kept and
+// tried again later without a limit.
+func Waiting(err error) bool {
+	return hardcover.IsTransient(err) || errors.Is(err, hardcover.ErrUnauthorized) || errors.Is(err, config.ErrNoToken)
+}
 
 // Kind is the result of one sync.
 type Kind int

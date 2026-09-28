@@ -4,10 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/clippings"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 )
 
@@ -105,5 +107,20 @@ func TestLocationToPage(t *testing.T) {
 	}
 	if p := locationToPage(661, 0, 401); p != 0 {
 		t.Errorf("no text length: %d", p)
+	}
+}
+
+// Clips sent with the old (time-zone-based) ID are not sent again.
+func TestMigrateIDs(t *testing.T) {
+	cl, err := clippings.Parse(strings.NewReader("Red Rising (Pierce Brown)\n- Your Highlight on Location 6145-6146 | Added on Monday, September 28, 2026 1:03:31 AM\n\nText\n==========\n"))
+	if err != nil || len(cl) != 1 {
+		t.Fatal(cl, err)
+	}
+	st := &ClipState{Sent: map[string]int{cl[0].LegacyID(): 42}}
+	if !migrateIDs(st, cl) || st.Sent[cl[0].ID()] != 42 || len(st.Sent) != 1 {
+		t.Fatalf("sent %v", st.Sent)
+	}
+	if migrateIDs(st, cl) {
+		t.Fatal("second run changed state")
 	}
 }

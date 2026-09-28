@@ -74,7 +74,16 @@ func (a *app) daemon(ctx context.Context) error {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
 	signal.Ignore(syscall.SIGHUP)
-	go func() { s := <-sig; log.Printf("daemon: %v, stopping", s); cancel() }()
+	go func() {
+		s := <-sig
+		log.Printf("daemon: %v, stopping", s)
+		cancel()
+		// Safety net: a stuck call must never keep a stopped daemon alive
+		// (then "Start" cannot replace it).
+		time.Sleep(15 * time.Second)
+		log.Printf("daemon: did not stop in 15 s, exiting")
+		os.Exit(1)
+	}()
 
 	trig := make(chan string, 1)
 	fire := func(why string) {
@@ -136,8 +145,8 @@ func (a *app) daemon(ctx context.Context) error {
 			log.Printf("daemon: ratings: %d sent", n)
 		}
 	}
-	// The Kindle empties fmcache.db soon after a star tap, so read it right
-	// after it changes (not only at scans).
+	// All Hardcover writes run in this goroutine (scan, then ratings, then
+	// clips), so two writes for one book never overlap.
 	var d *daemon.Daemon
 	ratings.OnReread = func(key string) { d.ClearFinished(key) }
 	d = &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), Logf: log.Printf,
@@ -149,8 +158,18 @@ func (a *app) daemon(ctx context.Context) error {
 				log.Printf("daemon: clips: %d sent", n)
 			}
 		}}
-	// Start the ratings watcher only now: it may call OnReread → d.
-	go watchRatings(ctx, filepath.Dir(metrics.DefaultPath), runRatings)
+	// The Kindle empties fmcache.db soon after a star tap, so the watcher
+	// copies new taps at once (no network), then asks for a scan to send them.
+	collect := func(ctx context.Context) {
+		n, err := ratings.Collect(ctx)
+		if err != nil {
+			log.Printf("daemon: ratings: %v", err)
+		}
+		if n > 0 {
+			fire("rating")
+		}
+	}
+	go watchRatings(ctx, filepath.Dir(metrics.DefaultPath), collect)
 	scan := func(why string) {
 		sctx, scancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer scancel()
@@ -235,7 +254,7 @@ func watchRatings(ctx context.Context, dir string, fn func(context.Context)) {
 	logged := false
 	for ctx.Err() == nil {
 		done, err := events.WatchDir(ctx, dir, func(name string, mask uint32) {
-			if strings.HasPrefix(name, "fmcache.db") && mask&(events.InCloseWrite|events.InModify) != 0 {
+			if (name == "fmcache.db" || name == "fmcache.db-wal") && mask&(events.InCloseWrite|events.InModify) != 0 {
 				select {
 				case kick <- struct{}{}:
 				default:

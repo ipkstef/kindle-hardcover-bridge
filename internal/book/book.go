@@ -41,11 +41,7 @@ func NormTitle(s string) string {
 	if i := strings.Index(s, ":"); i > 0 {
 		s = s[:i]
 	}
-	s = normWords(s)
-	for _, a := range []string{"the ", "a ", "an "} {
-		s = strings.TrimPrefix(s, a)
-	}
-	return s
+	return stripArticle(normWords(s))
 }
 
 // NormName makes an author name comparable. Initials and dots are dropped so
@@ -95,22 +91,87 @@ func Match(local Local, cands []Candidate) int {
 	return m[0]
 }
 
-// MatchAll returns the indexes of all candidates whose normalized title equals
-// one of titles and (if both sides have authors) share an author.
+// MatchAll returns the indexes of all candidates whose title equals one of
+// titles (TitleEqual) and (if both sides have authors) share an author.
 func MatchAll(titles, authors []string, cands []Candidate) []int {
-	want := map[string]bool{}
-	for _, t := range titles {
-		if n := NormTitle(t); n != "" {
-			want[n] = true
-		}
-	}
 	var out []int
 	for i, c := range cands {
-		if want[NormTitle(c.Title)] && authorsOverlap(authors, c.Authors) {
-			out = append(out, i)
+		if !authorsOverlap(authors, c.Authors) {
+			continue
+		}
+		for _, t := range titles {
+			if TitleEqual(t, c.Title) {
+				out = append(out, i)
+				break
+			}
 		}
 	}
 	return out
+}
+
+// TitleEqual reports if two titles name the same book. Series suffixes in
+// "( )" or "[ ]" are ignored. A subtitle (after ":") must be the same on both
+// sides, unless it only describes the book ("A Novel", "Book 1 of ...").
+// So "Mistborn: Secret History" is not "Mistborn: The Final Empire", and
+// "Red Rising: Sons of Ares" is not "Red Rising", but "Project Hail Mary: A
+// Novel" is "Project Hail Mary". "Mistborn: The Final Empire" also equals
+// "The Final Empire" (series name in front).
+func TitleEqual(a, b string) bool {
+	am, as := titleParts(a)
+	bm, bs := titleParts(b)
+	if am == "" || bm == "" {
+		return false
+	}
+	switch {
+	case am == bm && as == bs:
+		return true
+	case am == bm:
+		return genericSubtitle(as) && genericSubtitle(bs)
+	case as != "" && as == bm && genericSubtitle(bs):
+		return true
+	case bs != "" && bs == am && genericSubtitle(as):
+		return true
+	}
+	return false
+}
+
+// titleParts returns the normalized main title and subtitle, without a
+// series suffix in "( )" or "[ ]" and without a leading article.
+func titleParts(s string) (main, sub string) {
+	if i := strings.IndexAny(s, "(["); i > 0 {
+		s = s[:i]
+	}
+	if i := strings.Index(s, ":"); i > 0 {
+		s, sub = s[:i], s[i+1:]
+	}
+	return stripArticle(normWords(s)), stripArticle(normWords(sub))
+}
+
+func stripArticle(s string) string {
+	for _, a := range []string{"the ", "a ", "an "} {
+		s = strings.TrimPrefix(s, a)
+	}
+	return s
+}
+
+// genericWords make a subtitle a description, not a different book.
+var genericWords = map[string]bool{
+	"novel": true, "novella": true, "book": true, "books": true, "series": true,
+	"trilogy": true, "duology": true, "saga": true, "volume": true, "vol": true,
+	"edition": true, "memoir": true, "thriller": true, "mystery": true,
+	"romance": true, "stories": true, "collection": true,
+}
+
+func genericSubtitle(sub string) bool {
+	if sub == "" {
+		return true
+	}
+	for _, w := range strings.Fields(sub) {
+		if genericWords[w] {
+			return true
+		}
+	}
+	return false
 }
 
 // TitleClose reports if one normalized title contains the other.

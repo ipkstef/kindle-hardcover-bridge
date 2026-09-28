@@ -64,6 +64,14 @@ func (e *OAuthError) Error() string {
 	return fmt.Sprintf("oauth: %s (HTTP %d)", e.Code, e.Status)
 }
 
+// Unwrap makes HTTP 5xx and 429 answers temporary failures.
+func (e *OAuthError) Unwrap() error {
+	if e.Status >= 500 || e.Status == http.StatusTooManyRequests {
+		return ErrTransient
+	}
+	return nil
+}
+
 // OAuth runs the device flow against Hardcover.
 type OAuth struct {
 	HTTP           *http.Client
@@ -123,6 +131,8 @@ func (o *OAuth) PollToken(ctx context.Context, dc *DeviceCode) (*Token, error) {
 		case errors.As(err, &oe) && oe.Code == "slow_down":
 			interval += 5 * time.Second
 			continue
+		case errors.Is(err, ErrTransient) && ctx.Err() == nil:
+			continue // e.g. Wi-Fi dropped for a moment
 		default:
 			return nil, err
 		}
@@ -161,18 +171,21 @@ func (o *OAuth) post(ctx context.Context, endpoint string, form url.Values, out 
 	req.Header.Set("Accept", "application/json")
 	resp, err := o.HTTP.Do(req)
 	if err != nil {
-		return err
+		return transient(err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return err
+		return transient(err)
 	}
 	if resp.StatusCode/100 != 2 {
 		oe := &OAuthError{Status: resp.StatusCode}
 		if json.Unmarshal(body, oe) != nil || oe.Code == "" {
 			oe.Code = "http_error"
 			oe.Description = strings.TrimSpace(string(body))
+		}
+		if len(oe.Description) > 200 { // an HTML error page must not fill the log
+			oe.Description = oe.Description[:200] + "..."
 		}
 		return oe
 	}

@@ -57,9 +57,21 @@ func (c Clip) ID() string {
 	return c.hash()
 }
 
+// hash uses the "Added on" time as written in the file (wall clock, no time
+// zone), so the ID does not change when the Kindle's time zone changes.
 func (c Clip) hash() string {
+	return c.hashWith(c.Added.Format("2006-01-02T15:04:05"))
+}
+
+// LegacyID is the ID used before 2026-09-28 (time converted to UTC, so it
+// depended on the time zone). Used once to carry over the sent list.
+func (c Clip) LegacyID() string {
+	return c.hashWith(c.Added.UTC().Format(time.RFC3339))
+}
+
+func (c Clip) hashWith(added string) string {
 	h := sha1.Sum([]byte(strings.Join([]string{c.Title, c.Author, string(c.Kind),
-		strconv.Itoa(c.LocStart), strconv.Itoa(c.LocEnd), c.Added.UTC().Format(time.RFC3339), c.Text}, "\x1f")))
+		strconv.Itoa(c.LocStart), strconv.Itoa(c.LocEnd), added, c.Text}, "\x1f")))
 	return hex.EncodeToString(h[:10])
 }
 

@@ -10,11 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/atomicfile"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/syncer"
@@ -55,6 +55,11 @@ type Daemon struct {
 
 	mu    sync.Mutex
 	state *State
+
+	// rereads: keys queued by ClearFinished, applied at the next scan. A
+	// separate lock, so ClearFinished never waits for a running scan.
+	rmu     sync.Mutex
+	rereads map[string]bool
 }
 
 // LoadState reads the state file (empty state if missing).
@@ -74,22 +79,20 @@ func LoadState(path string) (*State, error) {
 }
 
 func (d *Daemon) save() error {
-	b, err := json.MarshalIndent(d.state, "", " ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(d.StatePath), 0o700); err != nil {
-		return err
-	}
-	tmp := d.StatePath + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, d.StatePath)
+	return atomicfile.WriteJSON(d.StatePath, d.state, 0o600)
 }
 
-// Scan compares cc.db with the snapshot and syncs changed books.
+// Scan compares cc.db with the snapshot and syncs changed books, then runs
+// After. After runs without the daemon lock held.
 func (d *Daemon) Scan(ctx context.Context) error {
+	err := d.scan(ctx)
+	if d.After != nil && ctx.Err() == nil {
+		d.After(ctx)
+	}
+	return err
+}
+
+func (d *Daemon) scan(ctx context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.state == nil {
@@ -106,6 +109,15 @@ func (d *Daemon) Scan(ctx context.Context) error {
 	if st.Finished == nil {
 		st.Finished = map[string]string{}
 	}
+	d.rmu.Lock()
+	for k := range d.rereads {
+		if _, ok := st.Finished[k]; ok {
+			delete(st.Finished, k)
+			d.Logf("daemon: book %s: re-read, finished mark cleared", short(k))
+		}
+	}
+	d.rereads = nil
+	d.rmu.Unlock()
 	maxAttempts := d.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 5
@@ -181,6 +193,17 @@ func (d *Daemon) Scan(ctx context.Context) error {
 		}
 		d.Logf("daemon: %q changed to %.2f%%", local.Title, p.Percent)
 		out, err := d.Sync.Sync(ctx, local)
+		if err != nil && syncer.Waiting(err) {
+			// No network or no sign-in: keep it, without counting an attempt.
+			// The other changed books would fail the same way; their snapshot
+			// is not updated, so the next scan finds them again.
+			d.Logf("daemon: %q: waiting (%v), will retry", local.Title, err)
+			if _, ok := st.Pending[k]; !ok {
+				st.Pending[k] = 0
+			}
+			st.LastResult = "waiting: " + err.Error()
+			break
+		}
 		if err != nil {
 			n := st.Pending[k] + 1
 			if n >= maxAttempts {
@@ -203,33 +226,22 @@ func (d *Daemon) Scan(ctx context.Context) error {
 		d.Logf("daemon: %q: %s", local.Title, st.LastResult)
 	}
 	st.LastScan = time.Now()
-	err = d.save()
-	if d.After != nil && ctx.Err() == nil {
-		d.After(ctx)
-	}
-	return err
+	return d.save()
 }
 
 // RestartPercent: a finished book that goes back under this percent was
 // restarted (same rule as the syncer).
 const RestartPercent = syncer.RestartPercent
 
-// ClearFinished forgets that a book was finished (a re-read started).
+// ClearFinished forgets that a book was finished (a re-read started). It is
+// applied at the next scan and never blocks.
 func (d *Daemon) ClearFinished(key string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.state == nil {
-		st, err := LoadState(d.StatePath)
-		if err != nil {
-			return
-		}
-		d.state = st
+	d.rmu.Lock()
+	defer d.rmu.Unlock()
+	if d.rereads == nil {
+		d.rereads = map[string]bool{}
 	}
-	if _, ok := d.state.Finished[key]; ok {
-		delete(d.state.Finished, key)
-		_ = d.save()
-		d.Logf("daemon: book %s: re-read, finished mark cleared", short(key))
-	}
+	d.rereads[key] = true
 }
 
 // Status returns a copy of the state (after at least one scan or load).

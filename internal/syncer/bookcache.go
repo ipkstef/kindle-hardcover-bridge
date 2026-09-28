@@ -3,10 +3,16 @@ package syncer
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/atomicfile"
 )
+
+// titleRule is the version of the title compare rule. Title-based matches
+// (library, search) made by an older rule are looked up again: rule 1 cut
+// subtitles and could pick a different book of the same series.
+const titleRule = 2
 
 // BookMap is one cached match: Kindle book key → Hardcover book. With it the
 // match waterfall (ISBN, search, library) runs once per book.
@@ -17,6 +23,16 @@ type BookMap struct {
 	Title     string    `json:"title"`
 	Method    string    `json:"method"`
 	At        time.Time `json:"at"`
+	Rule      int       `json:"rule,omitempty"` // titleRule when made
+}
+
+// byTitle reports if the match came from a title compare, not an ID.
+func (m BookMap) byTitle() bool {
+	switch m.Method {
+	case "library", "search", "search+year":
+		return true
+	}
+	return false
 }
 
 // BookCache stores matches in a JSON file (a local database is planned later,
@@ -43,6 +59,9 @@ func (c *BookCache) Get(key string) (BookMap, bool) {
 	defer c.mu.Unlock()
 	c.load()
 	m, ok := c.m[key]
+	if ok && m.byTitle() && m.Rule < titleRule {
+		return BookMap{}, false
+	}
 	return m, ok
 }
 
@@ -54,17 +73,7 @@ func (c *BookCache) Put(key string, m BookMap) error {
 	if m.At.IsZero() {
 		m.At = time.Now()
 	}
+	m.Rule = titleRule
 	c.m[key] = m
-	b, err := json.MarshalIndent(c.m, "", " ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(c.Path), 0o700); err != nil {
-		return err
-	}
-	tmp := c.Path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, c.Path)
+	return atomicfile.WriteJSON(c.Path, c.m, 0o600)
 }

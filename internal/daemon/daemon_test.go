@@ -3,10 +3,12 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/syncer"
 )
@@ -33,6 +35,7 @@ type fakeSync struct {
 	calls      []string
 	readStates []int
 	fail       bool
+	offline    bool
 	finished   bool
 }
 
@@ -40,7 +43,10 @@ func (f *fakeSync) Sync(_ context.Context, l *book.Local) (syncer.Outcome, error
 	f.calls = append(f.calls, l.Key)
 	f.readStates = append(f.readStates, l.ReadState)
 	if f.fail {
-		return syncer.Outcome{}, errors.New("network down")
+		return syncer.Outcome{}, errors.New("graphql: bad request")
+	}
+	if f.offline {
+		return syncer.Outcome{}, fmt.Errorf("%w: dial tcp: no route", hardcover.ErrTransient)
 	}
 	return syncer.Outcome{Kind: syncer.Sent, Page: 1, Pages: 10, Finished: f.finished}, nil
 }
@@ -173,5 +179,48 @@ func TestSteadyReadStateNotFinish(t *testing.T) {
 	d.Scan(context.Background())
 	if len(s.readStates) != 1 || s.readStates[0] != 2 {
 		t.Fatalf("change to 2: %v", s.readStates)
+	}
+}
+
+// Offline errors never use up the attempts: the book stays pending until the
+// network is back.
+func TestOfflineNeverGivesUp(t *testing.T) {
+	src := &fakeSrc{m: map[string]readers.Progress{"a": pr(10, 100)}}
+	s := &fakeSync{}
+	d := newD(t, src, s)
+	d.Scan(context.Background())
+	src.m["a"] = pr(20, 200)
+	s.offline = true
+	for i := 0; i < 10; i++ {
+		d.Scan(context.Background())
+	}
+	s.offline, s.calls = false, nil
+	d.Scan(context.Background())
+	if len(s.calls) != 1 {
+		t.Fatalf("after network back: calls %v", s.calls)
+	}
+	s.calls = nil
+	d.Scan(context.Background())
+	if len(s.calls) != 0 {
+		t.Fatalf("sent again: %v", s.calls)
+	}
+}
+
+// ClearFinished from another goroutine during a scan must not block (it used
+// to wait for the scan lock while the scan waited for the caller's lock).
+func TestClearFinishedDoesNotBlock(t *testing.T) {
+	src := &fakeSrc{m: map[string]readers.Progress{"a": pr(10, 100)}}
+	d := newD(t, src, &fakeSync{})
+	done := make(chan struct{})
+	d.After = func(context.Context) {
+		d.mu.Lock() // the scan lock must be free here
+		d.mu.Unlock()
+	}
+	d.mu.Lock()
+	go func() { d.ClearFinished("a"); close(done) }()
+	<-done
+	d.mu.Unlock()
+	if err := d.Scan(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }

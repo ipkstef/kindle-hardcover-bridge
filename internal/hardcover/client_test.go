@@ -103,3 +103,25 @@ func TestRetry429AndMeCache(t *testing.T) {
 		t.Fatalf("cache miss: calls %d", calls)
 	}
 }
+
+// Server errors and no network are temporary; a GraphQL error is not.
+func TestTransientErrors(t *testing.T) {
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("bad gateway"))
+	})
+	if err := c.Do(context.Background(), "{x}", nil, nil); !IsTransient(err) {
+		t.Errorf("502: %v not transient", err)
+	}
+	c = testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"errors":[{"message":"field 'x' not found"}]}`))
+	})
+	if err := c.Do(context.Background(), "{x}", nil, nil); err == nil || IsTransient(err) {
+		t.Errorf("graphql error: %v", err)
+	}
+	c = &Client{HTTP: &http.Client{Timeout: time.Second}, Endpoint: "http://127.0.0.1:1",
+		Token: func(context.Context) (string, error) { return "tok", nil }}
+	if err := c.Do(context.Background(), "{x}", nil, nil); !IsTransient(err) {
+		t.Errorf("no network: %v not transient", err)
+	}
+}

@@ -57,15 +57,17 @@ func TestRateSyncSurvivesFlushAndOffline(t *testing.T) {
 	}
 }
 
-func TestShelfChoiceSent(t *testing.T) {
+// shelfRun sends one shelf record for a book whose Hardcover status is have.
+// It returns the status written, or nil if none.
+func shelfRun(t *testing.T, shelf string, have int) any {
 	dir := t.TempDir()
 	fm := filepath.Join(dir, "fmcache.db")
 	db, _ := sql.Open("sqlite", fm)
 	db.Exec(`CREATE TABLE records (id INTEGER PRIMARY KEY, schema_name TEXT, created_timestamp INTEGER, record TEXT)`)
 	// Record format as seen on the device.
-	db.Exec(`INSERT INTO records VALUES (1,'goodreads_autoshelvings',1000,'{"action_id":"PerformManualShelving","context":"end_actions","kindle_asin":"k","shelf_status":"to-read"}')`)
+	db.Exec(`INSERT INTO records VALUES (1,'goodreads_autoshelvings',1000,'{"action_id":"PerformManualShelving","context":"end_actions","kindle_asin":"k","shelf_status":"` + shelf + `"}')`)
 	db.Close()
-	f := newFake(2)
+	f := newFake(have)
 	rs := &RateSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
 		Path: fm, StatePath: filepath.Join(dir, "ratings.json")}
 	n, err := rs.Run(context.Background())
@@ -78,8 +80,17 @@ func TestShelfChoiceSent(t *testing.T) {
 			status = f.vars[i]["status"]
 		}
 	}
-	if status != float64(1) {
-		t.Fatalf("status %v, ops %v", status, f.ops)
+	return status
+}
+
+func TestShelfChoiceSent(t *testing.T) {
+	// Want to Read → Currently Reading: forward, sent.
+	if got := shelfRun(t, "currently-reading", 1); got != float64(2) {
+		t.Fatalf("want→reading: status %v", got)
+	}
+	// Currently Reading → Want to Read: backward, not sent.
+	if got := shelfRun(t, "to-read", 2); got != nil {
+		t.Fatalf("reading→want sent: %v", got)
 	}
 }
 

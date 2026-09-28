@@ -57,3 +57,26 @@ func TestPercentToPage(t *testing.T) {
 		}
 	}
 }
+
+func TestTitleEqual(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"Mistborn: Secret History", "Mistborn: The Final Empire", false},
+		{"Red Rising: Sons of Ares", "Red Rising", false},
+		{"Red Rising", "Red Rising: Sons of Ares", false},
+		{"Project Hail Mary: A Novel", "Project Hail Mary", true},
+		{"The Practice Effect: A Novel", "Practice Effect", true},
+		{"Red Rising (The Red Rising Trilogy, Book 1)", "Red Rising", true},
+		{"Mistborn: The Final Empire", "The Final Empire", true},
+		{"The Way of Kings: Book One of the Stormlight Archive", "The Way of Kings", true},
+		{"Mistborn: The Final Empire", "Mistborn: The Final Empire", true},
+		{"Dune", "Dune Messiah", false},
+	}
+	for _, c := range cases {
+		if got := TitleEqual(c.a, c.b); got != c.want {
+			t.Errorf("TitleEqual(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}

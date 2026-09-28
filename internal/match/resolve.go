@@ -43,7 +43,8 @@ type Result struct {
 type Library func(ctx context.Context) ([]hardcover.UserBook, error)
 
 // Resolve runs the waterfall. steps gets one line per attempt (for the log).
-// It returns (nil, steps, nil) when nothing matches confidently.
+// It returns (nil, steps, nil) when nothing matches confidently, and an error
+// when a step could not run (sign-in, no network): then nothing is known.
 func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Library) (*Result, []string, error) {
 	var steps []string
 	logf := func(f string, a ...any) { steps = append(steps, fmt.Sprintf(f, a...)) }
@@ -56,7 +57,7 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Lib
 			}
 			for _, q := range lookups(x) {
 				hits, err := cat.EditionsBy(ctx, q.field, q.value)
-				if errors.Is(err, hardcover.ErrUnauthorized) {
+				if stop(err) {
 					return nil, steps, err
 				}
 				if err != nil {
@@ -110,7 +111,7 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Lib
 	var library []hardcover.UserBook
 	if loadLibrary != nil {
 		lib, err := loadLibrary(ctx)
-		if errors.Is(err, hardcover.ErrUnauthorized) {
+		if stop(err) {
 			return nil, steps, err
 		}
 		if err != nil {
@@ -140,7 +141,7 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Lib
 			q += " " + id.Authors[0]
 		}
 		hits, err := cat.SearchBooks(ctx, q, 10)
-		if errors.Is(err, hardcover.ErrUnauthorized) {
+		if stop(err) {
 			return nil, steps, err
 		}
 		if err != nil {
@@ -177,6 +178,13 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Lib
 		}
 	}
 	return nil, steps, nil
+}
+
+// stop reports errors that end the waterfall: sign-in problems and temporary
+// failures (no network, 5xx, 429). A temporary failure must not fall through
+// to a weaker step or end as "not found": the caller tries again later.
+func stop(err error) bool {
+	return errors.Is(err, hardcover.ErrUnauthorized) || hardcover.IsTransient(err)
 }
 
 type lookup struct{ field, value string }

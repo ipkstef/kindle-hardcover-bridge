@@ -109,10 +109,24 @@ func (e Errors) Error() string {
 // ErrUnauthorized means the token was rejected. The user must sign in again.
 var ErrUnauthorized = errors.New("hardcover: token rejected, sign in again")
 
+// ErrTransient marks a failure that can go away by itself: no network, a
+// timeout, HTTP 5xx or 429. The caller keeps the work and tries again later;
+// it must never treat it as "not found".
+var ErrTransient = errors.New("temporary failure")
+
+// IsTransient reports if err is a temporary failure (see ErrTransient). A
+// cancelled or timed-out context also counts.
+func IsTransient(err error) bool {
+	return errors.Is(err, ErrTransient) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+}
+
+func transient(err error) error { return fmt.Errorf("%w: %w", ErrTransient, err) }
+
 // errRetry429 carries the wait time of a 429 answer.
 type errRetry429 struct{ wait time.Duration }
 
 func (e errRetry429) Error() string { return "hardcover: HTTP 429 (rate limit)" }
+func (e errRetry429) Unwrap() error { return ErrTransient }
 
 // Do runs one GraphQL request and decodes "data" into out. It waits for the
 // rate limiter and retries after HTTP 429.
@@ -153,26 +167,29 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 	req.Header.Set("User-Agent", "kindle-hardcover-bridge (https://github.com/ipkstef/kindle-hardcover-bridge)")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return err
+		return transient(err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
-		return err
+		return transient(err)
 	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrUnauthorized
 	}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		wait := 2 * time.Second
-		if m := retryInRe.FindSubmatch(raw); m != nil {
+		if ra, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
+			wait = time.Duration(ra+1) * time.Second
+		} else if m := retryInRe.FindSubmatch(raw); m != nil {
 			if n, err := strconv.Atoi(string(m[1])); err == nil {
 				wait = time.Duration(n+1) * time.Second
 			}
-		} else if ra, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
-			wait = time.Duration(ra+1) * time.Second
 		}
 		return errRetry429{wait: min(wait, time.Minute)}
+	}
+	if resp.StatusCode/100 == 5 {
+		return transient(fmt.Errorf("hardcover: HTTP %d: %.200s", resp.StatusCode, raw))
 	}
 	var r struct {
 		Data   json.RawMessage `json:"data"`

@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/certs"
@@ -52,8 +53,9 @@ type app struct {
 	stateDir string
 	logPath  string
 
-	hc *hardcover.Client // one per process: rate limiter + cached "me"
-	sy *syncer.Syncer
+	hc    *hardcover.Client // one per process: rate limiter + cached "me"
+	sy    *syncer.Syncer
+	tokMu sync.Mutex
 }
 
 func main() {
@@ -271,29 +273,57 @@ func (a *app) newClient() *hardcover.Client {
 	return &hardcover.Client{
 		HTTP:     a.oauth.HTTP,
 		Endpoint: hardcover.GraphQLEndpoint,
-		Token: func(ctx context.Context) (string, error) {
-			tok, err := a.store.Load()
-			if err != nil {
-				return "", err
-			}
-			if tok.Expired(5*time.Minute) && tok.RefreshToken != "" && a.oauth.ClientID != "" {
-				nt, err := a.oauth.Refresh(ctx, tok.RefreshToken)
-				if err != nil {
-					log.Printf("token refresh failed: %v", err)
-					return "", hardcover.ErrUnauthorized
-				}
-				if nt.RefreshToken == "" {
-					nt.RefreshToken = tok.RefreshToken
-				}
-				if err := a.store.Save(nt); err != nil {
-					return "", err
-				}
-				log.Printf("token refreshed")
-				tok = nt
-			}
-			return tok.AccessToken, nil
-		},
+		Token:    a.token,
 	}
+}
+
+// token returns a valid access token and refreshes it when it expires soon.
+// One refresh at a time: a mutex in this process and a file lock across
+// processes, then the token is read again (another caller may have
+// refreshed it already; the old refresh token may no longer work).
+func (a *app) token(ctx context.Context) (string, error) {
+	a.tokMu.Lock()
+	defer a.tokMu.Unlock()
+	tok, err := a.store.Load()
+	if err != nil {
+		return "", err
+	}
+	if !a.needRefresh(tok) {
+		return tok.AccessToken, nil
+	}
+	unlock, err := a.store.Lock()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	if tok, err = a.store.Load(); err != nil {
+		return "", err
+	}
+	if !a.needRefresh(tok) {
+		return tok.AccessToken, nil
+	}
+	nt, err := a.oauth.Refresh(ctx, tok.RefreshToken)
+	if err != nil {
+		log.Printf("token refresh failed: %v", err)
+		var oe *hardcover.OAuthError
+		if errors.As(err, &oe) && !hardcover.IsTransient(err) {
+			// Refused (e.g. invalid_grant): the user must sign in again.
+			return "", fmt.Errorf("%w (%v)", hardcover.ErrUnauthorized, err)
+		}
+		return "", err // no network or server problem: try again later
+	}
+	if nt.RefreshToken == "" {
+		nt.RefreshToken = tok.RefreshToken
+	}
+	if err := a.store.Save(nt); err != nil {
+		return "", err
+	}
+	log.Printf("token refreshed")
+	return nt.AccessToken, nil
+}
+
+func (a *app) needRefresh(t *hardcover.Token) bool {
+	return t.Expired(5*time.Minute) && t.RefreshToken != "" && a.oauth.ClientID != ""
 }
 
 func httpClient() *http.Client {
