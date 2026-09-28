@@ -68,9 +68,12 @@ KFX: no file metadata yet (cc.db fields only).
 - **Highlights → private quotes, notes → private notes** (journal, privacy 3),
   from `My Clippings.txt`. Built. First run records a baseline; menu
   "Import all old highlights & notes" sends older ones.
-- **Rating:** reuse the stock end-of-book "Before you go…" dialog (stars +
-  Goodreads shelf). Research probe item 8 finds where the tap is stored.
-  Granular edits are done on hardcover.app by the user.
+- **Rating:** reuse the stock end-of-book "Before you go…" dialog. Built: the
+  star tap is read from `fmcache.db` (`goodreads_book_ratings`) and sent as
+  the Hardcover rating (`internal/metrics`, `RateSync`). The Kindle still
+  shows "Rating Error" for sideloaded books (we cannot change the reader).
+  Goodreads shelf choice: not mapped yet. Granular edits on hardcover.app.
+- **Notes on highlights:** one private note: `Highlight: "…"` + `Note: …`.
 - **Privacy:** shelf entry (status, progress, rating) uses the account
   default (user controls it on Hardcover). Notes/quotes always private.
 - **No reviews** from the Kindle → no `write:reviews` scope.

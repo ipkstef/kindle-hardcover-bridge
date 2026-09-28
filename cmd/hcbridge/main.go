@@ -30,6 +30,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/clippings"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/config"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/metrics"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/screen"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/syncer"
@@ -215,6 +216,11 @@ func (a *app) syncNow(ctx context.Context) error {
 func (a *app) clipSync() *syncer.ClipSync {
 	return &syncer.ClipSync{S: a.syncer(), Books: a.db, Path: clippings.DefaultPath,
 		StatePath: filepath.Join(a.stateDir, "clips.json")}
+}
+
+func (a *app) rateSync() *syncer.RateSync {
+	return &syncer.RateSync{S: a.syncer(), Books: a.db, Path: metrics.DefaultPath,
+		StatePath: filepath.Join(a.stateDir, "ratings.json")}
 }
 
 func (a *app) clipsNow(ctx context.Context, all bool) error {

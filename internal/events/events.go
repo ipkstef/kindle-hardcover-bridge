@@ -67,19 +67,31 @@ const (
 )
 
 // WatchDir watches a directory with inotify and calls onEvent for each event.
-// It returns an error at once if inotify is not available.
-func WatchDir(ctx context.Context, dir string, onEvent func(name string, mask uint32)) error {
+// It returns an error at once if inotify is not available. The returned
+// channel is closed when the watch ends: ctx done, or the folder is gone or
+// unmounted (e.g. /mnt/us in USB mode); the caller may then watch again.
+func WatchDir(ctx context.Context, dir string, onEvent func(name string, mask uint32)) (<-chan struct{}, error) {
 	fd, err := syscall.InotifyInit()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	mask := uint32(InModify | InCloseWrite | InCreate | InDelete | InMovedTo)
 	if _, err := syscall.InotifyAddWatch(fd, dir, mask); err != nil {
 		syscall.Close(fd)
-		return err
+		return nil, err
 	}
-	go func() { <-ctx.Done(); syscall.Close(fd) }()
+	done := make(chan struct{})
+	stop := make(chan struct{})
 	go func() {
+		select {
+		case <-ctx.Done():
+		case <-stop:
+		}
+		syscall.Close(fd)
+	}()
+	go func() {
+		defer close(done)
+		defer close(stop)
 		buf := make([]byte, 64*1024)
 		for {
 			n, err := syscall.Read(fd, buf)
@@ -99,10 +111,13 @@ func WatchDir(ctx context.Context, dir string, onEvent func(name string, mask ui
 					break
 				}
 				name := strings.TrimRight(string(buf[off+syscall.SizeofInotifyEvent:end]), "\x00")
+				if ev.Mask&(syscall.IN_IGNORED|syscall.IN_UNMOUNT) != 0 {
+					return // watch removed: folder deleted or unmounted
+				}
 				onEvent(name, ev.Mask)
 				off = end
 			}
 		}
 	}()
-	return nil
+	return done, nil
 }

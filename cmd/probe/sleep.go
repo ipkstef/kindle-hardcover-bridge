@@ -120,7 +120,7 @@ func sleepProbe(args []string) int {
 	}
 
 	// inotify on /var/local (names only, cc.db and others).
-	_ = events.WatchDir(ctx, *varDir, func(name string, mask uint32) {
+	_, _ = events.WatchDir(ctx, *varDir, func(name string, mask uint32) {
 		if mask&(events.InCloseWrite|events.InDelete|events.InMovedTo) != 0 {
 			p.logf("inotify %s: %s %s", *varDir, name, maskStr(mask))
 		}
@@ -207,7 +207,7 @@ func (p *sleepRec) findBook(ctx context.Context, path string) {
 	p.sdrCh = ch
 	p.mu.Unlock()
 	p.logf("book: %s (sdr %s)", filepath.Base(path), filepath.Base(sdr))
-	err := events.WatchDir(wctx, sdr, func(name string, mask uint32) {
+	_, err := events.WatchDir(wctx, sdr, func(name string, mask uint32) {
 		p.logf("inotify sdr: %s %s", name, maskStr(mask))
 		if mask&(events.InCloseWrite|events.InMovedTo) != 0 {
 			select {

@@ -205,3 +205,37 @@ int64 save time in ms (equals cc.db `p_lastAccess`).
 `com.lab126.CVMAnnotationProxy sendReadingProgress`,
 `com.lab126.whisperstore ingest_lpr_sidecar`,
 `com.lab126.yjr.annotations gotoBookPosition`.
+
+## Rating research (probe item 8, 2026-09-28, 05:26–05:36 UTC)
+User opened the end of a sideloaded book ("Before you go…" dialog), tapped
+4 stars. The Kindle showed "Rating Error: An error occurred while posting your
+rating" (sideloaded book, no Amazon/Goodreads match). Raw data not in the repo
+(metrics hold device serial and account IDs).
+
+- **No LIPC event** from dialog/journal/userdata/outbox/Goodreads services.
+- **The tap is stored in the metrics cache** `/mnt/us/system/fmcache/fmcache.db`,
+  table `records` (id, schema_name, schema_version, app_session_id,
+  reading_session_id, encoded_size, sequence_number, created_timestamp (ms),
+  priority, record JSON):
+  `schema_name = goodreads_book_ratings`,
+  `{"action_id":"write_rating","book_asin":"<cc.db p_cdeKey>","context":"end_actions","context_id":"none","event_type":"change_rating","rating":"4"}`
+  Written **before** the failed post (05:27:48).
+- The cache is uploaded and **emptied** on sleep (73 KB → 20 KB at 05:32:56).
+  So the daemon reads it on every change (inotify) and copies taps to its own
+  state at once.
+- Other record types seen: `highlight_actions`, `note_actions`,
+  `ereader_open_book`, `ereader_close_book`, `eink_end_actions_class_instance`,
+  … Table `reading_sessions` holds `end_reading_location`, `is_complete`
+  (possible future source).
+- Goodreads shelf choice in the dialog: not tested (the rating error came
+  first). **UNVERIFIED** where it is stored.
+
+## Daemon test (2026-09-28, 05:29–05:36 UTC)
+- Start: all event sources OK (appmgrd, powerd, cmd, inotify).
+- Red Rising (100 %, read state 2): found via ISBN, added, finished, status
+  Read. Highlights sent as private quotes, notes as private notes.
+- **Bug (fixed):** 3 min later Hardcover showed the book as Currently Reading
+  (cause UNVERIFIED); paging back to 98.22 % (read state still 2) finished it
+  a **second** time (second finished read). Fix: finish is a one-time action
+  per book in the daemon; a read already finished today only gets the status.
+- **Fixed:** a note on a highlight was sent without the highlighted text.

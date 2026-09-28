@@ -474,6 +474,21 @@ func (c *Client) SetStatus(ctx context.Context, userBookID, statusID int) (*User
 	return r.R.check()
 }
 
+// SetRating sets the star rating (0.5–5) of a user book. It follows the
+// shelf entry's privacy. Scope: write:library.
+func (c *Client) SetRating(ctx context.Context, userBookID int, rating float64) (*UserBook, error) {
+	var r struct {
+		R userBookResult `json:"update_user_book"`
+	}
+	q := `mutation ($id: Int!, $rating: numeric) {
+		update_user_book(id: $id, object: {rating: $rating}) { error user_book {` + userBookFields + `} }
+	}`
+	if err := c.Do(ctx, q, map[string]any{"id": userBookID, "rating": rating}, &r); err != nil {
+		return nil, err
+	}
+	return r.R.check()
+}
+
 // DefaultEdition returns the book's default ebook edition, else its default
 // physical edition, else nil.
 func (c *Client) DefaultEdition(ctx context.Context, bookID int) (*Edition, error) {

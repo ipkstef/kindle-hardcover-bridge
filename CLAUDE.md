@@ -46,6 +46,11 @@ state from the **stock Amazon Kindle reader** and sends it to **Hardcover.app**.
 cmd/daemon/          entry point, poll loop, change detection
 internal/readers/    cc.db reader
 internal/sidecar/    KRDS sidecar reader (.azw3f lpr/fpr)
+internal/clippings/  My Clippings.txt parser
+internal/metrics/    fmcache.db reader (end-of-book star rating)
+internal/syncer/     sync logic: progress, finish, clips, ratings
+internal/daemon/     change detection + state
+internal/events/     LIPC + inotify watchers
 internal/book/       book identity (ASIN, title, author, ISBN)
 internal/hardcover/  OAuth device flow, token refresh, GraphQL client
 internal/config/     config + token storage
@@ -84,8 +89,9 @@ triggers on `goingToScreenSaver`. Sidecar reader built (KRDS parser,
 Hardcover features researched (`docs/hardcover-features.md`). User decisions
 in `docs/roadmap.md` §2b. Built: finish detection (>99 % / read state 2),
 highlights+notes → private journal (`internal/clippings`, `ClipSync`).
-Rating: research probe item 8 (end-of-book dialog). Next: user runs the
-daemon + rating research on the device.
+Daemon ran on device (finish + clips OK; double-finish bug fixed). Rating
+found in `/mnt/us/system/fmcache/fmcache.db` (`goodreads_book_ratings`,
+emptied on sleep) → `RateSync` built. Next: device test of ratings + fixes.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/daemon"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/events"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/metrics"
 )
 
 const (
@@ -103,7 +104,7 @@ func (a *app) daemon(ctx context.Context) error {
 			fire("db commit")
 		}
 	}
-	if err := events.WatchDir(ctx, dbDir, onFile); err != nil {
+	if _, err := events.WatchDir(ctx, dbDir, onFile); err != nil {
 		caps = append(caps, "inotify: "+err.Error())
 	} else {
 		caps = append(caps, "inotify: ok")
@@ -111,8 +112,20 @@ func (a *app) daemon(ctx context.Context) error {
 	log.Printf("daemon: started, pid %d (%s)", os.Getpid(), strings.Join(caps, ", "))
 
 	clips := a.clipSync()
+	ratings := a.rateSync()
+	runRatings := func(ctx context.Context) {
+		if n, err := ratings.Run(ctx); err != nil {
+			log.Printf("daemon: ratings: %v (retry at next check)", err)
+		} else if n > 0 {
+			log.Printf("daemon: ratings: %d sent", n)
+		}
+	}
+	// The Kindle empties fmcache.db soon after a star tap, so read it right
+	// after it changes (not only at scans).
+	go watchRatings(ctx, filepath.Dir(metrics.DefaultPath), runRatings)
 	d := &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), Logf: log.Printf,
 		After: func(ctx context.Context) {
+			runRatings(ctx)
 			if n, err := clips.Run(ctx, false); err != nil {
 				log.Printf("daemon: clips: %v (retry at next check)", err)
 			} else if n > 0 {
@@ -156,6 +169,49 @@ func (a *app) daemon(ctx context.Context) error {
 			}
 		}
 		scan(why)
+	}
+}
+
+// watchRatings runs fn ~1 s after fmcache.db changes. /mnt/us disappears in
+// USB mode, so it watches again when the folder is back.
+func watchRatings(ctx context.Context, dir string, fn func(context.Context)) {
+	kick := make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-kick:
+			}
+			time.Sleep(time.Second) // let the Kindle finish its write
+			fn(ctx)
+		}
+	}()
+	logged := false
+	for ctx.Err() == nil {
+		done, err := events.WatchDir(ctx, dir, func(name string, mask uint32) {
+			if strings.HasPrefix(name, "fmcache.db") && mask&(events.InCloseWrite|events.InModify) != 0 {
+				select {
+				case kick <- struct{}{}:
+				default:
+				}
+			}
+		})
+		if err != nil {
+			if !logged {
+				log.Printf("daemon: ratings watch %s: %v (will retry)", dir, err)
+				logged = true
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Minute):
+			}
+			continue
+		}
+		log.Printf("daemon: ratings watch on %s", dir)
+		logged = false
+		<-done
 	}
 }
 
