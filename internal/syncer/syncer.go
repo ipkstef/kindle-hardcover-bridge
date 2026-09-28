@@ -145,7 +145,7 @@ func (s *Syncer) Identify(ctx context.Context, local *book.Local) (*match.Result
 func (s *Syncer) Resolve(ctx context.Context, local *book.Local) (*match.Result, error) {
 	if at, ok := s.missed(local.Key); ok {
 		s.logf("identify: %q: not found at %s, next look-up after %s", local.Title,
-			at.Format("15:04"), at.Add(missTTL).Format("Jan 2 15:04"))
+			at.UTC().Format("15:04"), at.Add(missTTL).UTC().Format("15:04"))
 		return nil, ErrNotFound
 	}
 	if s.Cache != nil && local.Key != "" {

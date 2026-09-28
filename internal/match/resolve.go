@@ -139,7 +139,7 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Lib
 	for _, t := range id.Titles {
 		q := t
 		if len(id.Authors) > 0 {
-			q += " " + id.Authors[0]
+			q += " " + book.DisplayName(id.Authors[0])
 		}
 		hits, err := cat.SearchBooks(ctx, q, 10)
 		if stop(err) {

@@ -47,6 +47,7 @@ func NormTitle(s string) string {
 // NormName makes an author name comparable. Initials and dots are dropped so
 // "James S. A. Corey" and "James S.A. Corey" both give "james corey".
 func NormName(s string) string {
+	s = DisplayName(s)
 	var keep []string
 	for _, w := range strings.Fields(normWords(strings.ReplaceAll(s, ".", ". "))) {
 		if len(w) > 1 {
@@ -54,6 +55,20 @@ func NormName(s string) string {
 		}
 	}
 	return strings.Join(keep, " ")
+}
+
+// DisplayName turns "Last, First" (Calibre author sort, seen in cc.db:
+// "Barnes, Jennifer Lynn") into "First Last". Other names are unchanged.
+func DisplayName(s string) string {
+	parts := strings.Split(s, ",")
+	if len(parts) != 2 {
+		return strings.TrimSpace(s)
+	}
+	last, first := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	if last == "" || first == "" || strings.Contains(last, " ") && strings.Contains(first, " ") {
+		return strings.TrimSpace(s)
+	}
+	return first + " " + last
 }
 
 func normWords(s string) string {

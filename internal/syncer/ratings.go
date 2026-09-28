@@ -76,6 +76,9 @@ var quietSchemas = map[string]bool{
 	"goodreads_eink_error_count_with_label": true,
 	"eink_end_actions_class_instance":       true,
 	"eink_end_actions_general":              true,
+	"goodreads_eink_count":                  true,
+	"goodreads_eink_latency":                true,
+	"ereader_dialog_display_metrics":        true,
 }
 
 // Collect copies new taps and shelf choices from fmcache.db into the state.
@@ -120,13 +123,13 @@ func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		drop(r.st)
-		sent++
 		return r.save(r.st)
 	}
 	for k, status := range shelves {
 		if err := r.sendShelf(ctx, k, status); err != nil {
 			return sent, err
 		}
+		sent++
 		if err := done(func(st *RateState) {
 			if st.Shelves[k] == status {
 				delete(st.Shelves, k)
@@ -136,7 +139,11 @@ func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
 		}
 	}
 	for _, x := range pending {
-		if err := r.sendRating(ctx, x); err != nil {
+		saved, err := r.sendRating(ctx, x)
+		if saved {
+			sent++ // only ratings really saved (not ignored or not found)
+		}
+		if err != nil {
 			return sent, err // keep pending, retry later (e.g. no Wi-Fi)
 		}
 		if err := done(func(st *RateState) {
@@ -208,15 +215,15 @@ func (r *RateSync) collect(ctx context.Context, st *RateState) (n int, err error
 	return n, nil
 }
 
-func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) error {
+func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) (saved bool, err error) {
 	if x.Stars <= 0 || x.Stars > 5 {
 		r.S.logf("ratings: book %s: rating %.1f ignored", short8(x.BookKey), x.Stars)
-		return nil
+		return false, nil
 	}
-	local, err := r.Books.BookByKey(ctx, x.BookKey)
-	if err != nil {
+	local, lerr := r.Books.BookByKey(ctx, x.BookKey)
+	if lerr != nil {
 		r.S.logf("ratings: book %s not in cc.db, dropped", short8(x.BookKey))
-		return nil
+		return false, nil
 	}
 	err = r.rate(ctx, local, x)
 	switch {
@@ -225,11 +232,11 @@ func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) error {
 	case errors.Is(err, ErrNotFound):
 		r.S.logf("ratings: %q not found on Hardcover, dropped", local.Title)
 		r.report(local.Title, x, RateNotFound)
-		return nil
+		return false, nil
 	case Waiting(err):
 		r.report(local.Title, x, RateQueued)
 	}
-	return err
+	return err == nil, err
 }
 
 // report calls OnResult once per tap.

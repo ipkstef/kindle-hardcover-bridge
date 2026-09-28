@@ -80,3 +80,20 @@ func TestTitleEqual(t *testing.T) {
 		}
 	}
 }
+
+func TestDisplayName(t *testing.T) {
+	cases := map[string]string{
+		"Barnes, Jennifer Lynn": "Jennifer Lynn Barnes",
+		"Matt Dinniman":         "Matt Dinniman",
+		"Tolkien, J. R. R.":     "J. R. R. Tolkien",
+		"a, b, c":               "a, b, c",
+	}
+	for in, want := range cases {
+		if got := DisplayName(in); got != want {
+			t.Errorf("DisplayName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if NormName("Barnes, Jennifer Lynn") != NormName("Jennifer Lynn Barnes") {
+		t.Error("NormName differs for Last, First")
+	}
+}

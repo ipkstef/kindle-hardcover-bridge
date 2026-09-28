@@ -397,3 +397,16 @@ system log (`/var/log/messages`) names each window:
   uses another action_id (UNVERIFIED). Now all rating records with a book
   are read and logged (`tap N stars … (context, action, event)`); 1–5 stars
   are sent, others ignored. Clearing with X then tapping works.
+
+## Version 492e91c on device (2026-09-28 18:04–18:12)
+- **Changing stars without X** writes `action_id: update_rating` (first
+  rating: `write_rating`); both are now sent. E.g. The Naturals 2 → 3,
+  Dungeon Anarchist's Cookbook 4 → 5.
+- **Duplicate books:** "A Wizard of Mars" → 2 matches, book 124283 with 30
+  readers chosen (`search+readers`), rating saved.
+- Rating on a finished book that is not on the shelves: added, finished,
+  rated in ~2–4 s.
+- Not found: "The Naturals" — author stored as **"Barnes, Jennifer Lynn"**
+  (last name first). Fixed: "Last, First" names are turned around.
+- Miss cache works (second tap: no look-up). Clips (note, quote) sent.
+- Progress: Darth Bane moved Want to Read → Currently Reading, page 17.

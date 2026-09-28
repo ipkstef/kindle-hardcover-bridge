@@ -179,7 +179,7 @@ func (a *app) daemon(ctx context.Context) error {
 		if n, err := ratings.Run(ctx); err != nil {
 			log.Printf("daemon: ratings: %v (retry at next check)", err)
 		} else if n > 0 {
-			log.Printf("daemon: ratings: %d sent", n)
+			log.Printf("daemon: ratings: %d saved", n)
 		}
 	}
 	// All Hardcover writes run in this goroutine (scan, then ratings, then
