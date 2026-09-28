@@ -38,7 +38,8 @@ type ClipSync struct {
 	StatePath string       // JSON state (used when DB is nil; imported once)
 	DB        *store.Store // optional
 
-	sent *store.Table[int]
+	sent   *store.Table[int]
+	warned map[string]bool // books already logged as not found
 }
 
 // clipMeta is the small part of ClipState, read before the sent list.
@@ -157,7 +158,13 @@ func (c *ClipSync) sendBook(ctx context.Context, title, author string, clips []c
 	}
 	res, ub, err := c.S.Identify(ctx, local)
 	if errors.Is(err, ErrNotFound) {
-		c.S.logf("clips: %q: not found on Hardcover, %d clippings kept for later", title, len(clips))
+		if !c.warned[title] { // once per book, not at every event
+			c.S.logf("clips: %q: not found on Hardcover, %d clippings kept for later", title, len(clips))
+			if c.warned == nil {
+				c.warned = map[string]bool{}
+			}
+			c.warned[title] = true
+		}
 		return 0, nil
 	}
 	if err != nil {

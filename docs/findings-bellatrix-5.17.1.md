@@ -416,3 +416,19 @@ system log (`/var/log/messages`) names each window:
   saved in 1 s. Log counts "1 saved".
 - **Sleep inside a book** (no go-Home): scan `(sleep, …)` sent Darth Bane
   6.11 % → page 25/418, then 11.06 % → page 46/418, ~5 s after sleep.
+
+## Version de61a18 on device (2026-09-28 20:41–20:48)
+- State DB works: daemon started on `hcbridge.db`, old state kept (no new
+  baseline), no errors. Quiet log: no per-event lines.
+- Ahsoka: ISBN hit ("Star Wars: Ahsoka" → "Ahsoka"), added, page 7/223.
+  Back to 0.03 % → forward only (not a re-read: book was Currently Reading).
+- Magicians: Want to Read → finished at 99.99 % (read state 2), then the
+  star tap (queued while "offline") was saved.
+- **Bug:** one 30 s timeout (slow answer, Wi-Fi up) turned on offline mode
+  → "No connection" box and ~3 min delay. Fixed: only DNS / dial failures
+  mean offline; a timeout is a slow server.
+- KFX book (Anne Rice …, Calibre title with file-name junk): text length 0,
+  sidecar lpr `<base64>:<pos>`; not found on Hardcover (expected; box tells
+  the user). Repeated identify / clips lines while offline or not found →
+  now logged once.
+- A tap first shown as "sent later" is now shown again with its result.

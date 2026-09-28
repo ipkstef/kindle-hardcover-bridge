@@ -57,8 +57,8 @@ type RateSync struct {
 	pend  *store.Table[metrics.Rating]
 	mu    sync.Mutex // guards st, told
 	st    *RateState
-	told  map[string]bool // taps already reported to OnResult
-	runMu sync.Mutex      // one Run at a time
+	told  map[string]RateResult // last result reported per tap
+	runMu sync.Mutex            // one Run at a time
 }
 
 // RateResult is the outcome of one star tap.
@@ -243,7 +243,8 @@ func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) (saved bool
 	return err == nil, err
 }
 
-// report calls OnResult once per tap.
+// report calls OnResult once per tap and result: a tap first reported as
+// "sent later" (offline) is reported again with its final result.
 func (r *RateSync) report(title string, x metrics.Rating, res RateResult) {
 	if r.OnResult == nil {
 		return
@@ -251,12 +252,12 @@ func (r *RateSync) report(title string, x metrics.Rating, res RateResult) {
 	id := x.BookKey + "@" + strconv.FormatInt(x.CreatedMS, 10)
 	r.mu.Lock()
 	if r.told == nil {
-		r.told = map[string]bool{}
+		r.told = map[string]RateResult{}
 	}
-	seen := r.told[id]
-	r.told[id] = true
+	prev, seen := r.told[id]
+	r.told[id] = res
 	r.mu.Unlock()
-	if !seen {
+	if !seen || prev != res {
 		r.OnResult(title, x.Stars, res)
 	}
 }

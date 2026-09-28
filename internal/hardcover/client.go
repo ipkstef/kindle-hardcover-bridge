@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -52,8 +53,8 @@ type Client struct {
 // without a "Wi-Fi back" event (the event may be missed).
 const offlineRetry = 10 * time.Minute
 
-// errOffline is returned while the client waits for the network.
-var errOffline = fmt.Errorf("%w: offline, waiting for Wi-Fi", ErrTransient)
+// ErrOffline is returned while the client waits for the network.
+var ErrOffline = fmt.Errorf("%w: offline, waiting for Wi-Fi", ErrTransient)
 
 // Online tells the client the network is back (Kindle "connectionAvailable").
 func (c *Client) Online() {
@@ -154,6 +155,19 @@ type netError struct{ err error }
 func (e netError) Error() string { return e.err.Error() }
 func (e netError) Unwrap() error { return e.err }
 
+// noNetwork reports errors that mean the device has no network: DNS
+// failure or no route / connection refused while dialing. A timeout while
+// waiting for the answer is a slow server, not offline (device log
+// 2026-09-28: one slow answer showed "No connection" with Wi-Fi up).
+func noNetwork(err error) bool {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial" && !op.Timeout()
+}
+
 // errRetry429 carries the wait time of a 429 answer.
 type errRetry429 struct{ wait time.Duration }
 
@@ -164,7 +178,7 @@ func (e errRetry429) Unwrap() error { return ErrTransient }
 // rate limiter and retries after HTTP 429.
 func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out any) error {
 	if c.Offline() {
-		return errOffline
+		return ErrOffline
 	}
 	for i := 0; ; i++ {
 		if err := c.wait(ctx); err != nil {
@@ -208,10 +222,10 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 	req.Header.Set("User-Agent", "kindle-hardcover-bridge (https://github.com/ipkstef/kindle-hardcover-bridge)")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		if ctx.Err() != nil {
-			return transient(err) // our timeout or stop, not the network
+		if ctx.Err() == nil && noNetwork(err) {
+			return transient(netError{err})
 		}
-		return transient(netError{err})
+		return transient(err) // e.g. a slow server (timeout): not "offline"
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))

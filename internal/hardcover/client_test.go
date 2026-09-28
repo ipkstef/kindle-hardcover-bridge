@@ -140,11 +140,24 @@ func TestOfflineMode(t *testing.T) {
 		t.Fatalf("first: %v offline=%v", err, c.Offline())
 	}
 	c.Endpoint = srv.URL // network "back", but no event yet
-	if err := c.Do(context.Background(), "{x}", nil, nil); !errors.Is(err, errOffline) || calls != 0 {
+	if err := c.Do(context.Background(), "{x}", nil, nil); !errors.Is(err, ErrOffline) || calls != 0 {
 		t.Fatalf("while offline: %v, %d calls", err, calls)
 	}
 	c.Online()
 	if err := c.Do(context.Background(), "{x}", nil, nil); err != nil || calls != 1 {
 		t.Fatalf("after Online: %v, %d calls", err, calls)
+	}
+}
+
+// A slow server (timeout while waiting for the answer) is not "offline".
+func TestTimeoutIsNotOffline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+	}))
+	defer srv.Close()
+	c := &Client{HTTP: &http.Client{Timeout: 50 * time.Millisecond}, Endpoint: srv.URL,
+		Token: func(context.Context) (string, error) { return "tok", nil }}
+	if err := c.Do(context.Background(), "{x}", nil, nil); !IsTransient(err) || c.Offline() {
+		t.Fatalf("err %v, offline %v", err, c.Offline())
 	}
 }

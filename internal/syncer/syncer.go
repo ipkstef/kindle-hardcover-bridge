@@ -145,16 +145,17 @@ func (s *Syncer) Identify(ctx context.Context, local *book.Local) (*match.Result
 // Resolve finds the Hardcover book: from the match cache, else with the
 // match waterfall (then cached). No shelf lookup.
 func (s *Syncer) Resolve(ctx context.Context, local *book.Local) (*match.Result, error) {
-	if at, ok := s.missed(local.Key); ok {
-		s.logf("identify: %q: not found at %s, next look-up after %s", local.Title,
-			at.UTC().Format("15:04"), at.Add(missTTL).UTC().Format("15:04"))
-		return nil, ErrNotFound
+	if _, ok := s.missed(local.Key); ok {
+		return nil, ErrNotFound // logged when it was not found (1 h ago at most)
 	}
 	if s.Cache != nil && local.Key != "" {
 		if m, ok := s.Cache.Get(local.Key); ok {
 			return &match.Result{BookID: m.BookID, EditionID: m.EditionID, Pages: m.Pages,
 				Title: m.Title, Method: "cache (" + m.Method + ")"}, nil
 		}
+	}
+	if s.C != nil && s.C.Offline() {
+		return nil, hardcover.ErrOffline // no look-up (and no log) while offline
 	}
 	var meta *mobi.Meta
 	if !strings.Contains(local.MimeType, "kfx") {
