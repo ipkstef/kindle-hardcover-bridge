@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -113,6 +114,7 @@ func (a *app) daemon(ctx context.Context) error {
 
 	clips := a.clipSync()
 	ratings := a.rateSync()
+	ratings.OnTap = func() { go logDialog(ctx) }
 	runRatings := func(ctx context.Context) {
 		if n, err := ratings.Run(ctx); err != nil {
 			log.Printf("daemon: ratings: %v (retry at next check)", err)
@@ -170,6 +172,32 @@ func (a *app) daemon(ctx context.Context) error {
 		}
 		scan(why)
 	}
+}
+
+// logDialog records the window manager state for 20 s after a star tap, to
+// learn how the "Rating Error" dialog can be closed or replaced. Read-only.
+func logDialog(ctx context.Context) {
+	last := ""
+	for i := 0; i < 40 && ctx.Err() == nil; i++ {
+		n := lipcGet(ctx, "com.lab126.winmgr", "activeDialogCount")
+		title := lipcGet(ctx, "com.lab126.winmgr", "getActiveAppTitle")
+		cur := n + " | " + title
+		if cur != last {
+			log.Printf("research: dialogs %s", cur)
+			last = cur
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
+func lipcGet(ctx context.Context, svc, prop string) string {
+	c, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	b, err := exec.CommandContext(c, "lipc-get-prop", svc, prop).CombinedOutput()
+	if err != nil {
+		return "error: " + err.Error()
+	}
+	return strings.TrimSpace(string(b))
 }
 
 // watchRatings runs fn ~1 s after fmcache.db changes. /mnt/us disappears in

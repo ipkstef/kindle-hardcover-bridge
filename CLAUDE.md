@@ -91,7 +91,10 @@ in `docs/roadmap.md` §2b. Built: finish detection (>99 % / read state 2),
 highlights+notes → private journal (`internal/clippings`, `ClipSync`).
 Daemon ran on device (finish + clips OK; double-finish bug fixed). Rating
 found in `/mnt/us/system/fmcache/fmcache.db` (`goodreads_book_ratings`,
-emptied on sleep) → `RateSync` built. Next: device test of ratings + fixes.
+emptied on sleep) → `RateSync` built and **works on device**. Goodreads shelf
+choice: mapping built (format UNVERIFIED; all goodreads/dialog/end-action
+records are logged as `research:`). "Rating Error" dialog: daemon logs dialog
+state after a tap (read-only); hiding it needs a user decision (constraint).
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

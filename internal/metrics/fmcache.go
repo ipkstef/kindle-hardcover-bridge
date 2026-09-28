@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	_ "modernc.org/sqlite" // pure Go
 )
@@ -83,4 +84,86 @@ func stars(raw json.RawMessage) float64 {
 	var f float64
 	_ = json.Unmarshal(raw, &f)
 	return f
+}
+
+// Record is one raw metrics record.
+type Record struct {
+	ID        int64
+	CreatedMS int64
+	Schema    string
+	JSON      string
+}
+
+// Records returns records created after sinceMS whose schema_name starts with
+// one of prefixes, oldest first. Used to learn formats (research) and to read
+// Goodreads shelf choices from the end-of-book dialog.
+func Records(ctx context.Context, path string, sinceMS int64, prefixes ...string) ([]Record, error) {
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro&_pragma=busy_timeout(3000)")
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT id, created_timestamp, schema_name, record FROM records
+		WHERE created_timestamp > ? ORDER BY created_timestamp, id`, sinceMS)
+	if err != nil {
+		return nil, fmt.Errorf("fmcache: %w", err)
+	}
+	defer rows.Close()
+	var out []Record
+	for rows.Next() {
+		var r Record
+		if err := rows.Scan(&r.ID, &r.CreatedMS, &r.Schema, &r.JSON); err != nil {
+			return out, fmt.Errorf("fmcache: %w", err)
+		}
+		for _, p := range prefixes {
+			if strings.HasPrefix(r.Schema, p) {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out, rows.Err()
+}
+
+// Shelf status IDs (Hardcover), for Goodreads shelf names.
+const (
+	ShelfNone       = 0
+	ShelfWantToRead = 1
+	ShelfReading    = 2
+	ShelfRead       = 3
+)
+
+// ShelfChoice finds a Goodreads shelf choice in a record: a string value of a
+// key that names a shelf ("shelf", "shelf_name", "new_shelf", "name", ...).
+// Returns the Hardcover status and the book key (book_asin). The record
+// format is UNVERIFIED: this accepts the usual Goodreads shelf names only.
+func ShelfChoice(recJSON string) (status int, bookKey, raw string) {
+	var m map[string]any
+	if json.Unmarshal([]byte(recJSON), &m) != nil {
+		return ShelfNone, "", ""
+	}
+	bookKey, _ = m["book_asin"].(string)
+	var walk func(v any, key string)
+	walk = func(v any, key string) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, x := range t {
+				walk(x, k)
+			}
+		case string:
+			if status != ShelfNone || !strings.Contains(strings.ToLower(key), "shelf") && key != "name" {
+				return
+			}
+			switch strings.ToLower(strings.NewReplacer("_", "-", " ", "-").Replace(t)) {
+			case "to-read", "want-to-read":
+				status, raw = ShelfWantToRead, t
+			case "currently-reading":
+				status, raw = ShelfReading, t
+			case "read":
+				status, raw = ShelfRead, t
+			}
+		}
+	}
+	walk(m, "")
+	return status, bookKey, raw
 }

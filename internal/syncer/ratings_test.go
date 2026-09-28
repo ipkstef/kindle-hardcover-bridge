@@ -56,3 +56,29 @@ func TestRateSyncSurvivesFlushAndOffline(t *testing.T) {
 		t.Fatalf("repeat: %d %v", n, f.ops)
 	}
 }
+
+func TestShelfChoiceSent(t *testing.T) {
+	dir := t.TempDir()
+	fm := filepath.Join(dir, "fmcache.db")
+	db, _ := sql.Open("sqlite", fm)
+	db.Exec(`CREATE TABLE records (id INTEGER PRIMARY KEY, schema_name TEXT, created_timestamp INTEGER, record TEXT)`)
+	// Format UNVERIFIED: a guess of the shelf record, to test the mapping.
+	db.Exec(`INSERT INTO records VALUES (1,'goodreads_shelf_actions',1000,'{"book_asin":"k","shelf":"to-read"}')`)
+	db.Close()
+	f := newFake(2)
+	rs := &RateSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
+		Path: fm, StatePath: filepath.Join(dir, "ratings.json")}
+	n, err := rs.Run(context.Background())
+	if err != nil || n != 1 {
+		t.Fatalf("got %d %v", n, err)
+	}
+	var status any
+	for i, op := range f.ops {
+		if op == "update_user_book" {
+			status = f.vars[i]["status"]
+		}
+	}
+	if status != float64(1) {
+		t.Fatalf("status %v, ops %v", status, f.ops)
+	}
+}

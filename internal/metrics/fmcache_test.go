@@ -46,3 +46,22 @@ func TestRatings(t *testing.T) {
 		t.Errorf("since: %+v", rs)
 	}
 }
+
+func TestShelfChoice(t *testing.T) {
+	cases := []struct {
+		rec    string
+		status int
+	}{
+		{`{"action_id":"write_shelf","book_asin":"k","shelf":"to-read"}`, ShelfWantToRead},
+		{`{"book_asin":"k","shelf":{"name":"currently-reading"}}`, ShelfReading},
+		{`{"book_asin":"k","new_shelf":"READ"}`, ShelfRead},
+		{`{"book_asin":"k","shelf":{"name":"unshelved"}}`, ShelfNone},
+		{`{"book_asin":"k","event_type":"read"}`, ShelfNone}, // not a shelf key
+	}
+	for _, c := range cases {
+		st, key, _ := ShelfChoice(c.rec)
+		if st != c.status || key != "k" {
+			t.Errorf("%s → %d %q, want %d", c.rec, st, key, c.status)
+		}
+	}
+}

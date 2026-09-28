@@ -22,6 +22,10 @@ type BookByKey interface {
 type RateState struct {
 	LastMS  int64                     `json:"last_ms"` // newest record read from fmcache
 	Pending map[string]metrics.Rating `json:"pending"` // book key → last tap, not yet sent
+	// OtherMS: newest non-rating record read (shelf choices, research log).
+	OtherMS int64 `json:"other_ms"`
+	// Shelves: book key → Hardcover status chosen in the dialog, not yet sent.
+	Shelves map[string]int `json:"shelves,omitempty"`
 }
 
 // RateSync sends star taps from the stock end-of-book dialog to Hardcover
@@ -32,8 +36,14 @@ type RateSync struct {
 	Books     BookByKey
 	Path      string // fmcache.db
 	StatePath string
-	mu        sync.Mutex
+	// OnTap is called when a new star tap is read (daemon: log the dialog).
+	OnTap func()
+	mu    sync.Mutex
 }
+
+// researchSchemas are logged in full to learn their format (shelf choice,
+// dialogs). Rating records are handled on their own.
+var researchSchemas = []string{"goodreads", "ereader_dialog", "eink_end_actions"}
 
 // Run copies new taps into the state, then sends pending ones.
 func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
@@ -53,10 +63,41 @@ func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
 			}
 			r.S.logf("ratings: tap %.0f stars on book %s (%s)", x.Stars, short8(x.BookKey), x.Context)
 		}
-		if len(rs) > 0 {
+		if len(rs) > 0 && r.OnTap != nil {
+			r.OnTap()
+		}
+		other, err := metrics.Records(ctx, r.Path, st.OtherMS, researchSchemas...)
+		if err != nil {
+			r.S.logf("ratings: read records %v", err)
+		}
+		for _, x := range other {
+			if x.CreatedMS > st.OtherMS {
+				st.OtherMS = x.CreatedMS
+			}
+			if x.Schema == "goodreads_book_ratings" {
+				continue
+			}
+			r.S.logf("research: %s %s", x.Schema, x.JSON)
+			if status, key, raw := metrics.ShelfChoice(x.JSON); status != metrics.ShelfNone && key != "" {
+				st.Shelves[key] = status
+				r.S.logf("shelf: book %s → %q (Hardcover status %d)", short8(key), raw, status)
+			}
+		}
+		if len(rs) > 0 || len(other) > 0 {
 			if err := r.save(st); err != nil {
 				return 0, err
 			}
+		}
+	}
+
+	for k, status := range st.Shelves {
+		if err := r.sendShelf(ctx, k, status); err != nil {
+			return sent, err
+		}
+		delete(st.Shelves, k)
+		sent++
+		if err := r.save(st); err != nil {
+			return sent, err
 		}
 	}
 
@@ -118,6 +159,43 @@ func (r *RateSync) send(ctx context.Context, x metrics.Rating) error {
 	return nil
 }
 
+// sendShelf applies a Goodreads shelf choice from the end-of-book dialog.
+// Read uses the normal finish flow (never a second finished read the same day).
+func (r *RateSync) sendShelf(ctx context.Context, key string, status int) error {
+	local, err := r.Books.BookByKey(ctx, key)
+	if err != nil {
+		r.S.logf("shelf: book %s not in cc.db, dropped", short8(key))
+		return nil
+	}
+	res, ub, err := r.S.Identify(ctx, local)
+	if errors.Is(err, ErrNotFound) {
+		r.S.logf("shelf: %q not found on Hardcover, dropped", local.Title)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if status == metrics.ShelfRead {
+		out, err := r.S.finish(ctx, local, res, ub)
+		if err == nil {
+			r.S.logf("shelf: %q → Read (%v)", local.Title, out.Kind)
+		}
+		return err
+	}
+	switch {
+	case ub == nil:
+		if _, err := r.S.addUserBook(ctx, res, status); err != nil {
+			return err
+		}
+	case ub.StatusID != status:
+		if _, err := r.S.C.SetStatus(ctx, ub.ID, status); err != nil {
+			return err
+		}
+	}
+	r.S.logf("shelf: %q → %s", local.Title, StatusName(status))
+	return nil
+}
+
 func short8(k string) string {
 	if len(k) > 8 {
 		return k[:8]
@@ -132,6 +210,9 @@ func (r *RateSync) load() *RateState {
 	}
 	if st.Pending == nil {
 		st.Pending = map[string]metrics.Rating{}
+	}
+	if st.Shelves == nil {
+		st.Shelves = map[string]int{}
 	}
 	return st
 }

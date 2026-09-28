@@ -239,3 +239,20 @@ rating" (sideloaded book, no Amazon/Goodreads match). Raw data not in the repo
   a **second** time (second finished read). Fix: finish is a one-time action
   per book in the daemon; a read already finished today only gets the status.
 - **Fixed:** a note on a highlight was sent without the highlighted text.
+
+## Rating on device (2026-09-28, 05:52 UTC)
+- Star tap (3) read from fmcache.db 1 s after the tap, sent to Hardcover as
+  rating 3 (user_book 19022737). **Works.** The dialog wrote the record twice
+  (4 s apart); last tap wins, so harmless.
+- Note on a highlight ("A Parade of Horribles", location 1218) sent as one
+  private note with the highlight text. **Works.**
+
+## "Rating Error" dialog — options (open)
+The error comes from the stock reader (post to Amazon/Goodreads fails for a
+sideloaded book). Changing its text = patching Amazon's reader → breaks the
+hard constraint "do not modify the reader". Candidate LIPC hooks (from
+`lipc-probe`, all **UNVERIFIED**, write-only, format unknown):
+`com.lab126.winmgr activeDialogCount` (r), `fakeKeyEvent`, `fakeTap`,
+`com.lab126.pillow pillowAlert` / `customDialog` / `dismissChrome`.
+Daemon now logs `activeDialogCount` + `getActiveAppTitle` for 20 s after a
+tap (read-only research).
