@@ -336,3 +336,23 @@ system log (`/var/log/messages`) names each window:
   errors (`lab126_asr.lua`).
 - `lipc-get-prop` without `-s` on `getActiveAppTitle` makes winmgr log a
   type warning on every read → now read with `-s`.
+
+## Dialog probe #2 + log of version 4959c3f (2026-09-28 ~11:51 / 15:50)
+- `/var/local`: **415 MB free of 487 MB**.
+- Pillow dialogs are HTML/JS in `/usr/share/webkit-1.0/pillow/`:
+  `simple_alert.html`, `sample_custom_dialog.html`, `javascripts/*` (incl.
+  `widget_button_bar.js`, `client_params_handler.js`). Pillow LIPC props:
+  `pillowAlert`, `customDialog` (write). Format: see probe #3 (UNVERIFIED).
+- winmgr `fakeTap` ("button:x:y:press") and `fakeKeyEvent`
+  ("windowId:keyType:keyCode:state") are **blocked unless ASR (screen
+  reader) mode or eat-tap mode is on** (`lab126_eat_tap_mode.lua`). So
+  closing the error box by a fake tap is not simple (option B).
+- End-of-book box = `…_A_EndActions` (non-centered). Goodreads lookup for
+  the sideloaded key fails (`LibraryBookByAsinGet … IOException`) before any
+  tap; the star tap then shows `UpdatingDialog` → `ConfirmationDialog`.
+- Sidecar `lpr` has a new form `224199:224198:83:<base64>`; the first field
+  is the position (224199 ÷ 798994 = 28.06 % = cc.db). Parser fixed.
+- `fmcache.db` read failed with `attempt to write a readonly database (776)`
+  (hot journal: read during the Kindle's commit). Watcher now reacts to the
+  journal delete (commit end), and reads retry 3× on busy/readonly.
+- Search step matched "An Unwelcome Quest" (library had no match).

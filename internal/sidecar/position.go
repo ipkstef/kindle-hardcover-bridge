@@ -42,8 +42,15 @@ func FromDoc(d *Doc) (Position, bool) {
 	return p, p.LPR != ""
 }
 
+// number reads a position. Plain "68089", or "224199:224198:83:<base64>"
+// (seen on FW 5.17.1, 2026-09-28): the first field is the position
+// (224199 ÷ text length 798994 = 28.06 %, same as cc.db).
 func number(s string) int64 {
-	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, ':'); i > 0 {
+		s = s[:i]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil || n < 0 {
 		return -1
 	}

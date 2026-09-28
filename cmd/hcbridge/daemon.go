@@ -288,7 +288,13 @@ func watchRatings(ctx context.Context, dir string, fn func(context.Context)) {
 	logged := false
 	for ctx.Err() == nil {
 		done, err := events.WatchDir(ctx, dir, func(name string, mask uint32) {
-			if (name == "fmcache.db" || name == "fmcache.db-wal") && mask&(events.InCloseWrite|events.InModify) != 0 {
+			// React to the end of a commit: journal deleted (rollback mode) or
+			// WAL written. A plain write to fmcache.db comes in the middle of
+			// a commit; reading then fails with "readonly database (776)"
+			// (hot journal, device log 2026-09-28).
+			if (name == "fmcache.db-journal" && mask&events.InDelete != 0) ||
+				(name == "fmcache.db-wal" && mask&events.InModify != 0) ||
+				(name == "fmcache.db" && mask&events.InCloseWrite != 0) {
 				select {
 				case kick <- struct{}{}:
 				default:

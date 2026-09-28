@@ -40,15 +40,10 @@ func (a *app) dialogProbe(ctx context.Context) error {
 	section := func(title, out string) { w("== %s ==\n%s", title, strings.TrimRight(out, "\n")) }
 	section("lipc-probe -l (goodreads, kpp, dialog)", grepLines(runOut(ctx, 30*time.Second, "lipc-probe", "-l"),
 		"goodreads", "kpp", "dialog", "pillow", "winmgr", "endaction", "booklet"))
-	// Pillow dialogs are HTML/JS files; customDialog takes one of their names
-	// (UNVERIFIED). Needed to show our own box (e.g. a half-star picker).
-	section("pillow dialog files", runOut(ctx, 30*time.Second, "find", "/usr/share", "/usr/lib", "/opt",
-		"-maxdepth", "6", "-path", "*pillow*", "(", "-name", "*.html", "-o", "-name", "*.js", "-o", "-name", "*.json", ")"))
-	// How winmgr handles fakeKeyEvent / fakeTap (to close the error dialog).
-	section("winmgr lua handlers", runOut(ctx, 20*time.Second, "grep", "-n", "-A25",
-		"-e", "fakeKeyEvent", "-e", "fakeTap", "-e", "activeDialogCount", "-r", "/etc/xdg/awesome"))
-	section("pillow: customDialog / pillowAlert users", runOut(ctx, 30*time.Second, "grep", "-rln",
-		"-e", "customDialog", "-e", "pillowAlert", "/usr/share", "/usr/lib", "/opt"))
+	// Probe #2 found pillow's dialog files and that fakeTap / fakeKeyEvent
+	// work only in ASR (screen reader) or eat-tap mode. Probe #3 copies the
+	// files that define the message and dialog formats, to read them.
+	w("copied files: %s", copyProbeFiles())
 	dump := func(why string) {
 		time.Sleep(300 * time.Millisecond) // let syslog catch up
 		section(why+": dialog lines in /var/log/messages", grepLines(tailFile("/var/log/messages", 400),
@@ -77,8 +72,52 @@ func (a *app) dialogProbe(ctx context.Context) error {
 	}
 	dump("end")
 	w("done")
-	a.screen.Show("Dialog probe: done.", "Connect USB and send", "  hcbridge-dialogprobe.txt")
+	a.screen.Show("Dialog probe: done.", "Connect USB and send", "  hcbridge-dialogprobe.txt",
+		"  + folder hcbridge-probe-files")
 	return nil
+}
+
+const probeFilesDir = "/mnt/us/hcbridge-probe-files"
+
+// probeFiles define pillow's alert / custom dialog formats and the window
+// manager's fake input rules (paths seen in probe #2).
+var probeFiles = []string{
+	"/usr/share/webkit-1.0/pillow/simple_alert.html",
+	"/usr/share/webkit-1.0/pillow/sample_custom_dialog.html",
+	"/usr/share/webkit-1.0/pillow/javascripts/simple_alert.js",
+	"/usr/share/webkit-1.0/pillow/javascripts/simple_alert_config.js",
+	"/usr/share/webkit-1.0/pillow/javascripts/sample_custom_dialog.js",
+	"/usr/share/webkit-1.0/pillow/javascripts/client_params_handler.js",
+	"/usr/share/webkit-1.0/pillow/javascripts/pillow.js",
+	"/usr/share/webkit-1.0/pillow/javascripts/pillow_case.js",
+	"/usr/share/webkit-1.0/pillow/javascripts/lipc_event_handler.js",
+	"/usr/share/webkit-1.0/pillow/javascripts/widget_button_bar.js",
+	"/usr/share/webkit-1.0/pillow/javascripts/constants.js",
+	"/usr/share/webkit-1.0/pillow/strings/simple_alert_strings.js",
+	"/usr/share/webkit-1.0/pillow/strings/sample_custom_dialog_strings.js",
+	"/etc/xdg/awesome/lab126_eat_tap_mode.lua",
+	"/etc/xdg/awesome/lab126_asr.lua",
+}
+
+// copyProbeFiles copies probeFiles (read-only on the source) to the USB
+// folder and returns a short result.
+func copyProbeFiles() string {
+	if err := os.MkdirAll(probeFilesDir, 0o755); err != nil {
+		return err.Error()
+	}
+	ok, errs := 0, []string{}
+	for _, p := range probeFiles {
+		b, err := os.ReadFile(p)
+		if err == nil {
+			err = os.WriteFile(probeFilesDir+"/"+strings.ReplaceAll(strings.TrimPrefix(p, "/"), "/", "_"), b, 0o644)
+		}
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		ok++
+	}
+	return fmt.Sprintf("%d of %d to %s %v", ok, len(probeFiles), probeFilesDir, errs)
 }
 
 func runOut(ctx context.Context, d time.Duration, name string, args ...string) string {

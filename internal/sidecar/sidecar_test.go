@@ -56,3 +56,15 @@ func TestNotKRDS(t *testing.T) {
 		t.Fatal("truncated data accepted")
 	}
 }
+
+func TestNumberWithFields(t *testing.T) {
+	if n := number("224199:224198:83:REFUQQAAAHxFQkFS"); n != 224199 {
+		t.Fatalf("got %d", n)
+	}
+	if n := number("68089"); n != 68089 {
+		t.Fatalf("got %d", n)
+	}
+	if n := number("abc"); n != -1 {
+		t.Fatalf("got %d", n)
+	}
+}

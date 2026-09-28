@@ -38,7 +38,7 @@ func ResolvePercent(l *book.Local, meta *mobi.Meta, sc *sidecar.Position) (float
 	if sc != nil && sc.LPR != "" {
 		scPct = fromPos(sc.LPRPos)
 		notes = append(notes, fmt.Sprintf("sidecar lpr %s fpr %s saved %s → %.2f%% (text length %d)",
-			sc.LPR, sc.FPR, sc.Saved.UTC().Format("2006-01-02 15:04:05"), scPct, textLen))
+			short(sc.LPR, 24), short(sc.FPR, 24), sc.Saved.UTC().Format("2006-01-02 15:04:05"), scPct, textLen))
 	}
 
 	if l.Percent > 0 {
@@ -64,4 +64,12 @@ func lprNumber(s string) int64 {
 		return -1
 	}
 	return n
+}
+
+// short cuts a raw position for the log (some hold a long base64 part).
+func short(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
