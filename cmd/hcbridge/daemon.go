@@ -19,6 +19,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/events"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/metrics"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/screen"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/syncer"
 )
 
 const (
@@ -154,17 +155,21 @@ func (a *app) daemon(ctx context.Context) error {
 	clips := a.clipSync()
 	ratings := a.rateSync()
 	// The Kindle shows "Rating Error" for a Goodreads call it cannot make
-	// (sideloaded books, probe 2026-09-28). Tell the user at once that the
-	// rating goes to Hardcover (option C): show our box as soon as the tap
-	// is read, before any network call; it is sent right after, or later if
-	// offline.
-	ratings.OnTap = func(taps []metrics.Rating) {
-		x := taps[len(taps)-1]
-		title := "this book"
-		if b, err := a.db.BookByKey(ctx, x.BookKey); err == nil && b.Title != "" {
-			title = b.Title
+	// (sideloaded books, probe 2026-09-28). Tell the user what really
+	// happened to the tap (option C). The tap is sent at once (no debounce),
+	// so the box comes ~1-2 s after it; an early box that said "will be
+	// saved" was wrong for a book not found (device log 2026-09-28).
+	ratings.OnResult = func(title string, stars float64, res syncer.RateResult) {
+		var text string
+		switch res {
+		case syncer.RateSaved:
+			text = fmt.Sprintf("%s: %g of 5 stars saved to Hardcover. You can ignore a Goodreads rating error.", title, stars)
+		case syncer.RateNotFound:
+			text = fmt.Sprintf("%s was not found on Hardcover, so the %g-star rating was not saved. Rate it on hardcover.app.", title, stars)
+		case syncer.RateQueued:
+			text = fmt.Sprintf("No connection. %g of 5 stars for %s will be sent to Hardcover later.", stars, title)
 		}
-		go ratingAlert(ctx, title, x.Stars)
+		go ratingAlert(ctx, text)
 	}
 	runRatings := func(ctx context.Context) {
 		if n, err := ratings.Run(ctx); err != nil {
@@ -259,18 +264,16 @@ func readerOpen(ctx context.Context) bool {
 	return strings.Contains(lipcGet(ctx, "com.lab126.winmgr", "getActiveAppTitle"), "com.lab126.booklet.reader")
 }
 
-// ratingAlert shows "N stars → Hardcover" on top of the Kindle's Goodreads
+// ratingAlert shows the rating result on top of the Kindle's Goodreads
 // error box: it waits until that box is open (a second dialog, at most
 // alertWait), so ours is not hidden under it.
-func ratingAlert(ctx context.Context, title string, stars float64) {
+func ratingAlert(ctx context.Context, text string) {
 	for end := time.Now().Add(alertWait); time.Now().Before(end) && ctx.Err() == nil; {
 		if n, _ := strconv.Atoi(lipcGet(ctx, "com.lab126.winmgr", "activeDialogCount")); n >= 2 {
 			break
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	text := fmt.Sprintf("%s: %g of 5 stars will be saved to Hardcover. You can ignore a Goodreads rating error.",
-		title, stars)
 	if err := screen.Alert("Hardcover", text, alertHideMs); err != nil {
 		log.Printf("daemon: alert: %v", err)
 	}

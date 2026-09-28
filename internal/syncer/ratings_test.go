@@ -156,3 +156,28 @@ func TestShelfReadingOnReadBookIsReread(t *testing.T) {
 		t.Fatalf("status %v ops %v", status, f.ops)
 	}
 }
+
+// OnResult reports a saved rating once per tap, even over several runs.
+func TestRatingResultReportedOnce(t *testing.T) {
+	dir := t.TempDir()
+	fm := filepath.Join(dir, "fmcache.db")
+	db, _ := sql.Open("sqlite", fm)
+	db.Exec(`CREATE TABLE records (id INTEGER PRIMARY KEY, schema_name TEXT, created_timestamp INTEGER, record TEXT)`)
+	db.Exec(`INSERT INTO records VALUES (1,'goodreads_book_ratings',1000,'{"action_id":"write_rating","book_asin":"k","rating":"4"}')`)
+	db.Close()
+	f := newFake(3)
+	var got []RateResult
+	rs := &RateSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
+		Path: fm, StatePath: filepath.Join(dir, "ratings.json"),
+		OnResult: func(_ string, stars float64, r RateResult) {
+			if stars != 4 {
+				t.Errorf("stars %v", stars)
+			}
+			got = append(got, r)
+		}}
+	rs.Run(context.Background())
+	rs.Run(context.Background())
+	if len(got) != 1 || got[0] != RateSaved {
+		t.Fatalf("results %v", got)
+	}
+}

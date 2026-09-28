@@ -376,3 +376,12 @@ system log (`/var/log/messages`) names each window:
   loading a file outside that folder is UNVERIFIED). `simple_alert` as a
   customDialog name: nothing shown.
 - Taps inside pillow dialogs are logged (`button-press:target=<dialog>`).
+
+## Version 229bd86 on device (2026-09-28 17:21–17:25)
+- Star tap → sent to Hardcover in **~1 s** (Dungeon Crawler Carl: tap
+  17:25:29, saved 17:25:30), no debounce.
+- The early box ("will be saved") was **wrong** for "A Wizard of Mars":
+  search found 2 books with the same title + author and no year → not
+  found, rating dropped. Now the box shows the real result (saved / not
+  found / sent later), ~1–2 s after the tap.
+- Dungeon Crawler Carl: Kindle read state 2 at 97.53 % → finished (rule).

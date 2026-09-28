@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/atomicfile"
@@ -37,9 +38,11 @@ type RateSync struct {
 	Books     BookByKey
 	Path      string // fmcache.db
 	StatePath string
-	// OnTap is called with new star taps as soon as they are read, before
-	// any network call (daemon: tell the user at once).
+	// OnTap is called with new star taps as soon as they are read.
 	OnTap func(taps []metrics.Rating)
+	// OnResult reports what happened to a tap (daemon: tell the user; the
+	// Kindle shows a Goodreads error for it). Called once per tap.
+	OnResult func(title string, stars float64, res RateResult)
 	// OnReread is called when a shelf choice starts a re-read (daemon: clear
 	// its "finished" mark for the book).
 	OnReread func(key string)
@@ -48,10 +51,20 @@ type RateSync struct {
 	// 2026-09-28: default logic only); the code stays for a later release.
 	SyncShelves bool
 
-	mu    sync.Mutex // guards st
+	mu    sync.Mutex // guards st, told
 	st    *RateState
-	runMu sync.Mutex // one Run at a time
+	told  map[string]bool // taps already reported to OnResult
+	runMu sync.Mutex      // one Run at a time
 }
+
+// RateResult is the outcome of one star tap.
+type RateResult int
+
+const (
+	RateSaved    RateResult = iota // saved on Hardcover
+	RateNotFound                   // book not found: not saved
+	RateQueued                     // no network or sign-in: sent later
+)
 
 // researchSchemas are logged in full to learn their format (shelf choice,
 // dialogs). Rating records are handled on their own.
@@ -205,11 +218,40 @@ func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) error {
 		r.S.logf("ratings: book %s not in cc.db, dropped", short8(x.BookKey))
 		return nil
 	}
-	res, ub, err := r.S.Identify(ctx, local)
-	if errors.Is(err, ErrNotFound) {
+	err = r.rate(ctx, local, x)
+	switch {
+	case err == nil:
+		r.report(local.Title, x, RateSaved)
+	case errors.Is(err, ErrNotFound):
 		r.S.logf("ratings: %q not found on Hardcover, dropped", local.Title)
+		r.report(local.Title, x, RateNotFound)
 		return nil
+	case Waiting(err):
+		r.report(local.Title, x, RateQueued)
 	}
+	return err
+}
+
+// report calls OnResult once per tap.
+func (r *RateSync) report(title string, x metrics.Rating, res RateResult) {
+	if r.OnResult == nil {
+		return
+	}
+	id := x.BookKey + "@" + strconv.FormatInt(x.CreatedMS, 10)
+	r.mu.Lock()
+	if r.told == nil {
+		r.told = map[string]bool{}
+	}
+	seen := r.told[id]
+	r.told[id] = true
+	r.mu.Unlock()
+	if !seen {
+		r.OnResult(title, x.Stars, res)
+	}
+}
+
+func (r *RateSync) rate(ctx context.Context, local *book.Local, x metrics.Rating) error {
+	res, ub, err := r.S.Identify(ctx, local)
 	if err != nil {
 		return err
 	}
@@ -226,8 +268,8 @@ func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) error {
 			return err
 		}
 		if ub == nil {
-			r.S.logf("ratings: %q could not be added, dropped", local.Title)
-			return nil
+			r.S.logf("ratings: %q could not be added", local.Title)
+			return ErrNotFound
 		}
 	}
 	if _, err := r.S.C.SetRating(ctx, ub.ID, x.Stars); err != nil {
