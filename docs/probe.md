@@ -43,6 +43,5 @@ User steps:
 6. Wait until 10 min are done (or KUAL → "4. Stop watch").
 7. Connect USB. Send `hcprobe-watch.txt`.
 
-**UNVERIFIED:** the report part ran on one Kindle; the watch has not run on a
-device yet. Older note: not yet run on any Kindle. HTTPS could not be tested in the
-dev sandbox (TLS is intercepted there).
+Status: the report (item 1) ran OK on one Kindle (FW 5.17.1). The watch
+(items 3–4) is **UNVERIFIED** on a device.
