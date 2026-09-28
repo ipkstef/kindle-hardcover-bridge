@@ -57,8 +57,8 @@ Research done for FW 5.17.1: percent is in `cc.db`, written on go-Home only
 Option B prototype built (`cmd/hcbridge`, KUAL menu "Hardcover", see
 `docs/prototype.md`): device-code sign-in + one manual sync. It only syncs a book
 that is already in the user's Hardcover "Currently Reading" list and matches by
-title + author (never guesses). **Not yet run on the device.** Waiting for the
-user's Hardcover OAuth client ID.
+title + author (never guesses). **Works on the user's Kindle** (sign-in +
+progress update confirmed). Open: progress can go backwards (see findings).
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

@@ -84,3 +84,16 @@ Conclusions:
    reading. **UNVERIFIED** why.
 6. `.azw3f` / `.azw3r` sidecars may hold the exact location (LPR). Format
    **UNVERIFIED**; research later.
+
+## Prototype test (hcbridge, 2026-09-28, 02:35–02:42 UTC)
+- **Device-code sign-in works.** Approved on phone in ~40 s.
+  Granted scope: `read:me:content read:library write:library read:catalog`
+  (we asked for `read:me`; the server gave `read:me:content`). Enough for
+  `me`, `user_books` and `update_user_book_read`.
+- **Sync works.** `update_user_book_read` set `progress_pages` on the open read
+  (edition with 688 pages).
+- Book not in "Currently Reading" → skipped (as designed). After the user added
+  it, the title + author match found it.
+- Percent sequence from `cc.db`: 10.72 → 10.60 → 14.58 → 10.60. Hardcover
+  followed it, **including backwards** (page 100 → 72). Cause of the drop is
+  **UNVERIFIED** (user paged back, or the reader wrote an older position).

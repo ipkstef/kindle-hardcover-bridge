@@ -27,8 +27,10 @@ query CurrentlyReading {
 
 ## Progress mutations (from the KOReader plugin source)
 Source: `Billiam/hardcoverapp.koplugin`, `hardcover/lib/hardcover_api.lua`.
-**UNVERIFIED** against official docs (docs.hardcover.app is blocked in the dev
-sandbox). Used in `internal/hardcover/client.go`.
+Not checked against official docs (blocked in the dev sandbox), but
+`me`, `user_books` (status 2) and `update_user_book_read` **work on the live API**
+(2026-09-28). `insert_user_book_read` is still **UNVERIFIED**.
+Used in `internal/hardcover/client.go`.
 
 - Progress is set in **pages** (`progress_pages`). Page = percent × edition
   pages (the plugin does the same).
