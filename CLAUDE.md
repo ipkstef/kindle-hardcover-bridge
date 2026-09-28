@@ -52,8 +52,9 @@ docs/                context docs (read these)
 ## Where we left off
 Research phase. Probe ran on the user's Kindle (kernel 4.9, FW 5.17.1): Go
 works, HTTPS works. `cc.db` has percent, not location; books are sideloaded (no
-ASIN). See `docs/findings-bellatrix-5.17.1.md`. Go version is still open (needs
-an old-kernel device). Next:
+ASIN). Percent is written to `cc.db` on go-Home (book close) and maybe on
+sleep, never on page turn. See `docs/findings-bellatrix-5.17.1.md`. Go version
+is still open (needs an old-kernel device). Next:
 - A) Read `kindle-reading-dashboard` + NickelHardcover source; list exact `cc.db`
   fields and Hardcover mutations needed.
 - B) Prototype: device-code login + one progress update to Hardcover.

@@ -59,3 +59,29 @@ not go Home, did not sleep, then connected USB.
 
 Conclusion: progress is **not** written on page turn. Still to test: go Home
 (book close) and sleep.
+
+## Watch test 2 (2026-09-28, 01:43–01:46 UTC)
+Steps: open book, turn pages, go Home, reopen, turn pages, sleep.
+
+| UTC | Event | `cc.db` | Sidecar |
+|---|---|---|---|
+| 01:43:07–09 | open book | `p_lastAccess` updated; percent 9.668701 | `.azw3r` written |
+| 01:43:41 | **go Home** | **percent → 10.723627** | `.azw3f` written (478 B) |
+| 01:44:12–14 | reopen | `p_lastAccess` updated | `.azw3r` written |
+| 01:44:34 | **sleep** (`screenSaver`) | written (`p_lastAccess`); percent same | `.azw3f` written |
+| 01:45:35 | `readyToSuspend` | – | – |
+| 01:46:26 | last log line (device suspended, loop stopped) | – | – |
+
+Conclusions:
+1. **Going Home writes `p_percentFinished`.** This is the main sync trigger.
+2. **Sleep writes `cc.db` and `.azw3f`.** It is **UNVERIFIED** if sleep also
+   writes a new percent (the percent did not change here; maybe no pages were
+   turned after reopen).
+3. Page turns do not write anything (test 1).
+4. `lipc-get-prop com.lab126.powerd state` gives `active`, `screenSaver`,
+   `readyToSuspend`. Background processes stop when the device suspends.
+5. The percent at open (9.668701) was lower than the value before test 1
+   (9.851788). The +1 % from test 1 was lost when USB was connected while
+   reading. **UNVERIFIED** why.
+6. `.azw3f` / `.azw3r` sidecars may hold the exact location (LPR). Format
+   **UNVERIFIED**; research later.
