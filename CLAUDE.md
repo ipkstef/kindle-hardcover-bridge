@@ -81,8 +81,8 @@ research done: sleep writes cc.db percent + `.azw3f` lpr/fpr; Wi-Fi up ~70 s
 after sleep, back ~1.5 s after wake (findings, roadmap §1b). Daemon now also
 triggers on `goingToScreenSaver`. Sidecar reader built (KRDS parser,
 `internal/sidecar`) as the 3rd position source; APNX dropped.
-Next: Hardcover features research (journals/notes, ratings, finish hook),
-then build the daemon for device testing.
+Hardcover features researched (`docs/hardcover-features.md`); waiting for the
+user's choices (notes source, rating flow, privacy). Then: daemon device test.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.
@@ -97,6 +97,7 @@ Go version still open (needs an old-kernel device); builds use Go 1.23.
 - `docs/findings-bellatrix-5.17.1.md` — results from the user's Kindle
 - `docs/prototype.md` — hcbridge prototype: setup and test steps
 - `docs/roadmap.md` — user goals and plan to the end product
+- `docs/hardcover-features.md` — journals, ratings, finish, re-read, scopes, limits
 
 ## Working rules for Claude
 - Mark anything not verified on a real device or in real docs as **UNVERIFIED**.
