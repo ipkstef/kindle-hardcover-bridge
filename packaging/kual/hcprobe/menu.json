@@ -5,7 +5,9 @@
 			"priority": 0,
 			"items": [
 				{ "name": "1. Run test (Wi-Fi on)", "priority": 1, "action": "/bin/sh ./run.sh" },
-				{ "name": "2. Copy reading DB to USB (optional)", "priority": 2, "action": "/bin/sh ./copydb.sh" }
+				{ "name": "2. Copy reading DB to USB (optional)", "priority": 2, "action": "/bin/sh ./copydb.sh" },
+				{ "name": "3. Watch reading (10 min)", "priority": 3, "action": "/bin/sh ./watch.sh" },
+				{ "name": "4. Stop watch", "priority": 4, "action": "/bin/sh ./stopwatch.sh" }
 			]
 		}
 	]
