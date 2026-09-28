@@ -40,6 +40,9 @@ import (
 // It is public by design (OAuth public client, no secret).
 var clientID = ""
 
+// version is set at build time: -ldflags "-X main.version=..."
+var version = "dev"
+
 type app struct {
 	oauth    *hardcover.OAuth
 	store    *config.TokenStore

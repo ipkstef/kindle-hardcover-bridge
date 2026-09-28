@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 PKG=packaging/kual/hcbridge
 mkdir -p "$PKG/bin" dist
 GOTOOLCHAIN=go1.23.12 CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=6 \
-	go build -trimpath -ldflags "-s -w -X main.clientID=${HC_CLIENT_ID:-}" \
+	go build -trimpath -ldflags "-s -w -X main.clientID=${HC_CLIENT_ID:-} -X main.version=$(git describe --always --dirty 2>/dev/null || echo dev)" \
 	-o "$PKG/bin/hcbridge" ./cmd/hcbridge
 rm -rf dist/hcbridge-pkg dist/hcbridge.zip
 mkdir -p dist/hcbridge-pkg/extensions

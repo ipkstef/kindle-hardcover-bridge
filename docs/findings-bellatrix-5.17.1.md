@@ -270,3 +270,13 @@ tap (read-only research).
   Fixed: match cache (`bookmap.json`), one shelf-entry lookup instead of the
   whole library, cached `me`, no re-reads, rate limiter (burst 5, 0.9/s),
   retry after 429. Rating on a known book = 2 calls.
+
+## Test with a stale daemon (2026-09-28, 06:18–06:23 UTC)
+- "Start background sync" found the old daemon running (`already running`),
+  so the **old binary kept running** and the new code was not tested (shelf
+  records only logged, no mapping). Fix: `daemon` now stops a running daemon
+  and takes over; the log and Status show the build version.
+- Shelf values seen again: `currently-reading`, `to-read`
+  (`goodreads_autoshelvings`).
+- USB mode: `stat My Clippings.txt: stale NFS file handle` → retried later
+  (as designed).

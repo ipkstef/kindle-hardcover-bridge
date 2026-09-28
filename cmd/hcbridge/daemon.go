@@ -49,8 +49,22 @@ func (a *app) daemon(ctx context.Context) error {
 	}
 	defer lock.Close()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		log.Printf("daemon: already running")
-		return nil
+		// An older daemon is running (maybe an old version, device log
+		// 2026-09-28): stop it and take over, so "Start" always runs this
+		// binary.
+		old := a.running()
+		log.Printf("daemon: replacing running daemon (pid %d)", old)
+		if old != 0 {
+			_ = syscall.Kill(old, syscall.SIGTERM)
+		}
+		locked := false
+		for i := 0; i < 40 && !locked; i++ {
+			time.Sleep(250 * time.Millisecond)
+			locked = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil
+		}
+		if !locked {
+			return fmt.Errorf("old daemon (pid %d) did not stop", old)
+		}
 	}
 	_ = lock.Truncate(0)
 	_, _ = lock.WriteAt([]byte(strconv.Itoa(os.Getpid())+"\n"), 0)
@@ -110,7 +124,7 @@ func (a *app) daemon(ctx context.Context) error {
 	} else {
 		caps = append(caps, "inotify: ok")
 	}
-	log.Printf("daemon: started, pid %d (%s)", os.Getpid(), strings.Join(caps, ", "))
+	log.Printf("daemon: started, version %s, pid %d (%s)", version, os.Getpid(), strings.Join(caps, ", "))
 
 	clips := a.clipSync()
 	ratings := a.rateSync()
@@ -307,6 +321,7 @@ func (a *app) status() error {
 	if _, err := a.store.Load(); errors.Is(err, os.ErrNotExist) || err != nil {
 		signed = "Signed in: NO"
 	}
-	a.screen.Show(run, signed, last, "Last result:", trim(res, 46), fmt.Sprintf("Waiting to retry: %d", len(st.Pending)))
+	a.screen.Show(run, signed, last, "Last result:", trim(res, 46), fmt.Sprintf("Waiting to retry: %d", len(st.Pending)),
+		"Version: "+version)
 	return nil
 }
