@@ -38,6 +38,11 @@
 					"name": "7. Sleep research (45 min)",
 					"priority": 7,
 					"action": "/bin/sh ./sleep.sh"
+				},
+				{
+					"name": "8. Rating research (20 min)",
+					"priority": 8,
+					"action": "/bin/sh ./rating.sh"
 				}
 			]
 		}

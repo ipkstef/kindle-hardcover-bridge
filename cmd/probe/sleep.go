@@ -44,6 +44,8 @@ func sleepProbe(args []string) int {
 	varDir := fs.String("var", "/var/local", "folder to scan for changed files")
 	secs := fs.Int("secs", 2700, "run time in seconds")
 	tick := fs.Int("tick", 120, "periodic snapshot interval in seconds")
+	extra := fs.String("pubs", "", "extra LIPC publishers (comma list); every event from them makes a snapshot")
+	scan := fs.String("scan", "", "extra folders to scan for changed files (comma list)")
 	_ = fs.Parse(args)
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -57,7 +59,13 @@ func sleepProbe(args []string) int {
 	}
 	defer tl.Close()
 
-	p := &sleepRec{out: *out, db: &readers.Database{Path: *dbPath}, varDir: *varDir,
+	dirs := []string{*varDir}
+	for _, d := range strings.Split(*scan, ",") {
+		if d = strings.TrimSpace(d); d != "" {
+			dirs = append(dirs, d)
+		}
+	}
+	p := &sleepRec{out: *out, db: &readers.Database{Path: *dbPath}, varDir: *varDir, scanDirs: dirs,
 		tl: tl, sdrHash: map[string]string{}, lipcHash: map[string]string{}}
 	p.logf("hcprobe sleep v0.1, %d s", *secs)
 
@@ -81,8 +89,16 @@ func sleepProbe(args []string) int {
 	}
 
 	interesting := regexp.MustCompile(`goingToScreenSaver|outOfScreenSaver|exitingScreenSaver|readyToSuspend|suspending|resuming|wakeup|appPaused|appActivating 1|historyChange|connectionAvailable|connectionNotAvailable|cmDisconnected|cmConnected`)
-	for _, pub := range []string{"com.lab126.powerd", "com.lab126.appmgrd", "com.lab126.wifid", "com.lab126.cmd",
-		"com.lab126.readingstreams", "com.lab126.booklet.reader", "com.lab126.reader", "com.lab126.reader.readingtimer"} {
+	pubs := []string{"com.lab126.powerd", "com.lab126.appmgrd", "com.lab126.wifid", "com.lab126.cmd",
+		"com.lab126.readingstreams", "com.lab126.booklet.reader", "com.lab126.reader", "com.lab126.reader.readingtimer"}
+	extraSet := map[string]bool{}
+	for _, e := range strings.Split(*extra, ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			pubs = append(pubs, e)
+			extraSet[e] = true
+		}
+	}
+	for _, pub := range pubs {
 		pub := pub
 		err := events.LIPC(ctx, pub, func(line string) {
 			p.logf("lipc %s: %s", pub, line)
@@ -93,7 +109,7 @@ func sleepProbe(args []string) int {
 					}
 				}
 			}
-			if interesting.MatchString(line) {
+			if extraSet[pub] || interesting.MatchString(line) {
 				ev := strings.Fields(line)[0]
 				req(pub[strings.LastIndex(pub, ".")+1:] + "-" + ev)
 			}
@@ -150,6 +166,7 @@ type sleepRec struct {
 	sdrHash  map[string]string
 	lipcHash map[string]string
 	lastScan time.Time
+	scanDirs []string
 	sdrCh    chan struct{}
 	sdrStop  context.CancelFunc
 }
@@ -246,8 +263,10 @@ func (p *sleepRec) snapshot(ctx context.Context, why string) {
 		w("--- %s ---\n%s", svc, outp)
 	}
 
-	w("\n== changed files in %s since last snapshot ==", p.varDir)
-	p.changedFiles(ctx, w)
+	for _, d := range p.scanDirs {
+		w("\n== changed files in %s since last snapshot ==", d)
+		p.changedFiles(ctx, d, w)
+	}
 	p.lastScan = now
 }
 
@@ -307,14 +326,14 @@ func (p *sleepRec) copySdr(dir string, w func(string, ...any)) {
 
 // changedFiles lists files under varDir changed since the last snapshot.
 // For changed SQLite DBs it dumps table names, row counts and newest rows.
-func (p *sleepRec) changedFiles(ctx context.Context, w func(string, ...any)) {
+func (p *sleepRec) changedFiles(ctx context.Context, root string, w func(string, ...any)) {
 	count := 0
-	_ = filepath.WalkDir(p.varDir, func(path string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || count > 5000 {
 			return nil
 		}
 		if d.IsDir() {
-			if strings.Count(strings.TrimPrefix(path, p.varDir), "/") > 3 {
+			if strings.Count(strings.TrimPrefix(path, root), "/") > 3 {
 				return filepath.SkipDir
 			}
 			return nil
@@ -356,7 +375,7 @@ func dumpDB(ctx context.Context, path string, w func(string, ...any)) {
 		var n int
 		_ = db.QueryRowContext(ctx, `SELECT count(*) FROM "`+t+`"`).Scan(&n)
 		w("   table %s: %d rows", t, n)
-		r, err := db.QueryContext(ctx, `SELECT * FROM "`+t+`" ORDER BY rowid DESC LIMIT 3`)
+		r, err := db.QueryContext(ctx, `SELECT * FROM "`+t+`" ORDER BY rowid DESC LIMIT 5`)
 		if err != nil {
 			continue
 		}

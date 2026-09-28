@@ -73,5 +73,12 @@ with item 4. Output folder `/mnt/us/hcprobe-sleep/`:
 Privacy: sidecar files may hold highlights/notes; DB dumps may hold account
 data. Review before sharing.
 
+## Rating research (menu item 8)
+Same recorder as item 7, 20 min, output `/mnt/us/hcprobe-rating/`. Also
+watches dialog, journaling, user-data, outbox (odot), metrics and Goodreads
+bridge services (every event → snapshot), and scans `/mnt/us/system`.
+Goal: find where the "Before you go…" star rating and Goodreads shelf are
+stored or sent.
+
 Status: the report (item 1) ran OK on one Kindle (FW 5.17.1). The watch
 (items 3–4) is **UNVERIFIED** on a device.

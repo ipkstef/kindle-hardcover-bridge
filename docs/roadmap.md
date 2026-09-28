@@ -62,6 +62,19 @@ Then (`hcbridge sync`, built, **UNVERIFIED** on device):
   percent 0 → not sent.
 KFX: no file metadata yet (cc.db fields only).
 
+## 2b. User decisions (2026-09-28)
+- **Finish:** Kindle percent > 99 % → finished; fallback: Kindle read state 2.
+  Built: finish open read (last page, finished_at today), then status Read.
+- **Highlights → private quotes, notes → private notes** (journal, privacy 3),
+  from `My Clippings.txt`. Built. First run records a baseline; menu
+  "Import all old highlights & notes" sends older ones.
+- **Rating:** reuse the stock end-of-book "Before you go…" dialog (stars +
+  Goodreads shelf). Research probe item 8 finds where the tap is stored.
+  Granular edits are done on hardcover.app by the user.
+- **Privacy:** shelf entry (status, progress, rating) uses the account
+  default (user controls it on Hardcover). Notes/quotes always private.
+- **No reviews** from the Kindle → no `write:reviews` scope.
+
 ## 3. Restart a book
 The Kindle has no "restart" concept; the user just goes to the start.
 Proposed rule (**to confirm with a test**):
@@ -71,9 +84,7 @@ Proposed rule (**to confirm with a test**):
 - Also check what Kindle "Mark as unread" does to `p_readState` /
   `p_percentFinished`.
 
-## 4. Finish a book
-- Kindle percent ≥ ~98 % or `p_readState` = 2 → mark read finished on
-  Hardcover (status 3, `finished_at` = today). Threshold **UNVERIFIED**.
+## 4. Finish a book — built (see 2b)
 
 ## 5. Install without KUAL
 - The Kindle library already lists `KUAL.sh` (type PDOC, mime

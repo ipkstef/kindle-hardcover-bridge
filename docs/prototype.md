@@ -19,6 +19,9 @@ Device-code sign-in, then one manual progress update. No daemon yet.
 |---|---|
 | Sign in | Shows URL + code on screen. Approve on phone. Saves token to `/var/local/hcbridge/token.json` (0600). |
 | Identify current book | Runs the match waterfall (`docs/roadmap.md` §2). Shows the Hardcover book, the method, and your shelf. Writes nothing. |
+| Sync highlights & notes now | New `My Clippings.txt` entries → private journal quotes/notes. |
+| Import all old highlights & notes | Also the entries from before the first run. |
+| Start / Stop background sync, Status | The daemon (`docs/roadmap.md` §1). |
 | Sync current book now | Reads current book from `cc.db`, finds it with the match waterfall; if it is on "Currently Reading", sets page = percent × edition pages (forward only). |
 | Who am I | Shows the signed-in user. |
 | Sign out | Deletes the token. |

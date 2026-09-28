@@ -81,8 +81,11 @@ research done: sleep writes cc.db percent + `.azw3f` lpr/fpr; Wi-Fi up ~70 s
 after sleep, back ~1.5 s after wake (findings, roadmap §1b). Daemon now also
 triggers on `goingToScreenSaver`. Sidecar reader built (KRDS parser,
 `internal/sidecar`) as the 3rd position source; APNX dropped.
-Hardcover features researched (`docs/hardcover-features.md`); waiting for the
-user's choices (notes source, rating flow, privacy). Then: daemon device test.
+Hardcover features researched (`docs/hardcover-features.md`). User decisions
+in `docs/roadmap.md` §2b. Built: finish detection (>99 % / read state 2),
+highlights+notes → private journal (`internal/clippings`, `ClipSync`).
+Rating: research probe item 8 (end-of-book dialog). Next: user runs the
+daemon + rating research on the device.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.
