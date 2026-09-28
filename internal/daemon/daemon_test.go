@@ -11,6 +11,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/store"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/syncer"
 )
 
@@ -254,5 +255,40 @@ func TestDeletedBookForgotten(t *testing.T) {
 	d.Scan(context.Background())
 	if _, ok := d.state.Snapshot["a"]; ok || len(d.state.Snapshot) != 1 {
 		t.Fatalf("snapshot %v", d.state.Snapshot)
+	}
+}
+
+// With the state database: state survives a restart, and the old
+// state.json is imported once.
+func TestDBStateRestartAndImport(t *testing.T) {
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "state.json")
+	os.WriteFile(jsonPath, []byte(`{"snapshot":{"a":{"percent":10,"last_access":100}},"pending":{},"finished":{"b":"2026-09-01"}}`), 0o600)
+	db, err := store.Open(filepath.Join(dir, "hcbridge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	src := &fakeSrc{m: map[string]readers.Progress{"a": pr(10, 100), "b": pr(100, 50)}}
+	s := &fakeSync{}
+	d := &Daemon{Src: src, Sync: s, StatePath: jsonPath, DB: db, Logf: t.Logf}
+	d.Scan(context.Background())
+	if len(s.calls) != 0 {
+		t.Fatalf("imported snapshot not used: %v", s.calls)
+	}
+	if _, err := os.Stat(jsonPath + ".migrated"); err != nil {
+		t.Fatal("state.json not migrated")
+	}
+	src.m["a"] = pr(20, 200)
+	d.Scan(context.Background())
+	// Restart: a new daemon on the same DB sees no change.
+	s2 := &fakeSync{}
+	d2 := &Daemon{Src: src, Sync: s2, StatePath: jsonPath, DB: db, Logf: t.Logf}
+	d2.Scan(context.Background())
+	if len(s2.calls) != 0 {
+		t.Fatalf("after restart: %v", s2.calls)
+	}
+	if d2.state.Finished["b"] != "2026-09-01" {
+		t.Fatalf("finished lost: %v", d2.state.Finished)
 	}
 }

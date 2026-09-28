@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -10,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -125,6 +125,7 @@ func (a *app) daemon(ctx context.Context) error {
 		}
 		onNet := func(line string) {
 			if strings.Contains(line, "connectionAvailable") {
+				a.client().Online() // end offline mode: send what is waiting
 				fire("network up")
 			}
 		}
@@ -177,7 +178,9 @@ func (a *app) daemon(ctx context.Context) error {
 	}
 	runRatings := func(ctx context.Context) {
 		if n, err := ratings.Run(ctx); err != nil {
-			log.Printf("daemon: ratings: %v (retry at next check)", err)
+			if !a.client().Offline() { // offline: already known, no log per event
+				log.Printf("daemon: ratings: %v (retry at next check)", err)
+			}
 		} else if n > 0 {
 			log.Printf("daemon: ratings: %d saved", n)
 		}
@@ -186,11 +189,14 @@ func (a *app) daemon(ctx context.Context) error {
 	// clips), so two writes for one book never overlap.
 	var d *daemon.Daemon
 	ratings.OnReread = func(key string) { d.ClearFinished(key) }
-	d = &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), Logf: log.Printf,
+	d = &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), DB: a.stateDB(), Logf: log.Printf,
+		Offline: a.client().Offline,
 		After: func(ctx context.Context) {
 			runRatings(ctx)
 			if n, err := clips.Run(ctx, false); err != nil {
-				log.Printf("daemon: clips: %v (retry at next check)", err)
+				if !a.client().Offline() {
+					log.Printf("daemon: clips: %v (retry at next check)", err)
+				}
 			} else if n > 0 {
 				log.Printf("daemon: clips: %d sent", n)
 			}
@@ -207,13 +213,18 @@ func (a *app) daemon(ctx context.Context) error {
 		}
 	}
 	go watchRatings(ctx, filepath.Dir(metrics.DefaultPath), collect)
+	counts, countsAt := map[string]int{}, time.Now()
 	scan := func(why string) {
 		sctx, scancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer scancel()
-		// One line per trigger, so a device log shows which events came
-		// (a scan with no change logs nothing else).
-		if why != "poll" {
-			log.Printf("daemon: scan (%s)", why)
+		// Quiet log: events are counted and summed up once an hour; a scan
+		// logs only real changes and errors.
+		for _, w := range strings.Split(why, ", ") {
+			counts[w]++
+		}
+		if time.Since(countsAt) >= time.Hour {
+			logCounts(counts, countsAt)
+			counts, countsAt = map[string]int{}, time.Now()
 		}
 		if err := d.Scan(sctx); err != nil && ctx.Err() == nil {
 			log.Printf("daemon: scan (%s): %v", why, err)
@@ -264,6 +275,23 @@ func (a *app) daemon(ctx context.Context) error {
 		}
 		scan(why)
 	}
+}
+
+// logCounts writes one line with the events of the last period.
+func logCounts(c map[string]int, since time.Time) {
+	if len(c) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(c))
+	for k := range c {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s %d", k, c[k])
+	}
+	log.Printf("daemon: events since %s: %s", since.UTC().Format("15:04"), strings.Join(parts, ", "))
 }
 
 // readerOpen reports if the stock reader is the active window (winmgr).
@@ -399,27 +427,35 @@ func (a *app) stop() error {
 }
 
 func (a *app) status() error {
-	st, err := daemon.LoadState(a.statePath())
-	if err != nil {
-		return err
+	var lastScan time.Time
+	var lastResult string
+	var pending int
+	if db := a.stateDB(); db != nil {
+		lastScan, lastResult, pending = daemon.ReadStatus(db)
+	} else {
+		st, err := daemon.LoadState(a.statePath())
+		if err != nil {
+			return err
+		}
+		lastScan, lastResult, pending = st.LastScan, st.LastResult, len(st.Pending)
 	}
 	run := "Background sync: OFF"
 	if pid := a.running(); pid != 0 {
 		run = fmt.Sprintf("Background sync: ON (pid %d)", pid)
 	}
 	last := "Last check: never"
-	if !st.LastScan.IsZero() {
-		last = "Last check: " + st.LastScan.Local().Format("Jan 2 15:04")
+	if !lastScan.IsZero() {
+		last = "Last check: " + lastScan.Local().Format("Jan 2 15:04")
 	}
-	res := st.LastResult
+	res := lastResult
 	if res == "" {
 		res = "-"
 	}
 	signed := "Signed in: yes"
-	if _, err := a.store.Load(); errors.Is(err, os.ErrNotExist) || err != nil {
+	if _, err := a.store.Load(); err != nil {
 		signed = "Signed in: NO"
 	}
-	a.screen.Show(run, signed, last, "Last result:", trim(res, 46), fmt.Sprintf("Waiting to retry: %d", len(st.Pending)),
+	a.screen.Show(run, signed, last, "Last result:", trim(res, 46), fmt.Sprintf("Waiting to retry: %d", pending),
 		"Version: "+version)
 	return nil
 }

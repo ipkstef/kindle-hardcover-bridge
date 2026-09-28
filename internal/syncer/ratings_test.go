@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/store"
 )
 
 func (fakeBooks) BookByKey(_ context.Context, key string) (*book.Local, error) {
@@ -179,5 +180,35 @@ func TestRatingResultReportedOnce(t *testing.T) {
 	rs.Run(context.Background())
 	if len(got) != 1 || got[0] != RateSaved {
 		t.Fatalf("results %v", got)
+	}
+}
+
+// Ratings with the state database: a tap survives a restart until sent.
+func TestRatingsDB(t *testing.T) {
+	dir := t.TempDir()
+	fm := filepath.Join(dir, "fmcache.db")
+	db, _ := sql.Open("sqlite", fm)
+	db.Exec(`CREATE TABLE records (id INTEGER PRIMARY KEY, schema_name TEXT, created_timestamp INTEGER, record TEXT)`)
+	db.Exec(`INSERT INTO records VALUES (1,'goodreads_book_ratings',1000,'{"action_id":"write_rating","book_asin":"k","rating":"4"}')`)
+	db.Close()
+	st, err := store.Open(filepath.Join(dir, "hcbridge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	rs := &RateSync{S: &Syncer{Logf: t.Logf}, Books: fakeBooks{}, Path: fm,
+		StatePath: filepath.Join(dir, "ratings.json"), DB: st}
+	if n, err := rs.Collect(context.Background()); err != nil || n != 1 {
+		t.Fatalf("collect %d %v", n, err)
+	}
+	// "Restart": a new RateSync on the same DB still has the tap.
+	f := newFake(3)
+	rs2 := &RateSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{}, Path: fm,
+		StatePath: filepath.Join(dir, "ratings.json"), DB: st}
+	if n, err := rs2.Run(context.Background()); err != nil || n != 1 {
+		t.Fatalf("run after restart: %d %v", n, err)
+	}
+	if st.Count(store.TRatings) != 0 {
+		t.Fatal("sent tap still pending")
 	}
 }

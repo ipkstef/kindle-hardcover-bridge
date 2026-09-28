@@ -13,6 +13,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/metrics"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/store"
 )
 
 // BookByKey is the part of the cc.db reader the rating sync needs.
@@ -51,6 +52,9 @@ type RateSync struct {
 	// 2026-09-28: default logic only); the code stays for a later release.
 	SyncShelves bool
 
+	DB *store.Store // optional state database (else StatePath JSON)
+
+	pend  *store.Table[metrics.Rating]
 	mu    sync.Mutex // guards st, told
 	st    *RateState
 	told  map[string]bool // taps already reported to OnResult
@@ -348,9 +352,33 @@ func short8(k string) string {
 	return k
 }
 
+const kvRatings = "ratings.cursors"
+
+// rateCursors is the small part of RateState kept in kv.
+type rateCursors struct {
+	LastMS  int64 `json:"last_ms"`
+	OtherMS int64 `json:"other_ms"`
+}
+
 func (r *RateSync) load() *RateState {
 	st := &RateState{}
-	if b, err := os.ReadFile(r.StatePath); err == nil {
+	if r.DB != nil {
+		r.pend = store.NewTable[metrics.Rating](r.DB, store.TRatings)
+		_ = r.DB.ImportJSON("ratings.json", r.StatePath, func(b []byte) error {
+			var old RateState
+			if json.Unmarshal(b, &old) != nil {
+				return nil
+			}
+			if err := r.pend.Save(old.Pending); err != nil {
+				return err
+			}
+			return r.DB.SetJSON(kvRatings, rateCursors{old.LastMS, old.OtherMS})
+		})
+		var c rateCursors
+		r.DB.GetJSON(kvRatings, &c)
+		st.LastMS, st.OtherMS = c.LastMS, c.OtherMS
+		st.Pending, _ = r.pend.Load()
+	} else if b, err := os.ReadFile(r.StatePath); err == nil {
 		_ = json.Unmarshal(b, st)
 	}
 	if st.Pending == nil {
@@ -362,6 +390,20 @@ func (r *RateSync) load() *RateState {
 	return st
 }
 
+// save writes the state; with the DB, the changed taps and the cursors in
+// one transaction. Shelf choices (sync off in this release) are not kept.
 func (r *RateSync) save(st *RateState) error {
-	return atomicfile.GuardedJSON(r.StatePath, st, 0o600)
+	if r.DB == nil {
+		return atomicfile.GuardedJSON(r.StatePath, st, 0o600)
+	}
+	ops, commit, err := r.pend.Diff(st.Pending)
+	if err != nil {
+		return err
+	}
+	b, _ := json.Marshal(rateCursors{st.LastMS, st.OtherMS})
+	if err := r.DB.Apply(append(ops, store.SetOp(kvRatings, string(b)))...); err != nil {
+		return err
+	}
+	commit()
+	return nil
 }

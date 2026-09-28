@@ -42,6 +42,31 @@ type Client struct {
 	last   time.Time // last refill
 	me     *Me
 	meAt   time.Time
+	// offlineAt: set when a request failed for lack of network. Until
+	// Online() is called (Wi-Fi back) or offlineRetry passed, requests fail
+	// at once with ErrTransient: no work, no radio use while offline.
+	offlineAt time.Time
+}
+
+// offlineRetry: while offline, try the network again after this long even
+// without a "Wi-Fi back" event (the event may be missed).
+const offlineRetry = 10 * time.Minute
+
+// errOffline is returned while the client waits for the network.
+var errOffline = fmt.Errorf("%w: offline, waiting for Wi-Fi", ErrTransient)
+
+// Online tells the client the network is back (Kindle "connectionAvailable").
+func (c *Client) Online() {
+	c.mu.Lock()
+	c.offlineAt = time.Time{}
+	c.mu.Unlock()
+}
+
+// Offline reports if the client is waiting for the network.
+func (c *Client) Offline() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return !c.offlineAt.IsZero() && time.Since(c.offlineAt) < offlineRetry
 }
 
 // Rate limit: Hardcover free tier allows 60 requests/min, burst 10
@@ -122,6 +147,13 @@ func IsTransient(err error) bool {
 
 func transient(err error) error { return fmt.Errorf("%w: %w", ErrTransient, err) }
 
+// netError marks a failure to reach the server at all (DNS, connect,
+// TLS): the device is offline. It turns on offline mode.
+type netError struct{ err error }
+
+func (e netError) Error() string { return e.err.Error() }
+func (e netError) Unwrap() error { return e.err }
+
 // errRetry429 carries the wait time of a 429 answer.
 type errRetry429 struct{ wait time.Duration }
 
@@ -131,11 +163,20 @@ func (e errRetry429) Unwrap() error { return ErrTransient }
 // Do runs one GraphQL request and decodes "data" into out. It waits for the
 // rate limiter and retries after HTTP 429.
 func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out any) error {
+	if c.Offline() {
+		return errOffline
+	}
 	for i := 0; ; i++ {
 		if err := c.wait(ctx); err != nil {
 			return err
 		}
 		err := c.do(ctx, query, vars, out)
+		var nerr netError
+		if errors.As(err, &nerr) {
+			c.mu.Lock()
+			c.offlineAt = time.Now()
+			c.mu.Unlock()
+		}
 		var r429 errRetry429
 		if !errors.As(err, &r429) || i >= maxRetry429 {
 			return err
@@ -167,7 +208,10 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 	req.Header.Set("User-Agent", "kindle-hardcover-bridge (https://github.com/ipkstef/kindle-hardcover-bridge)")
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return transient(err)
+		if ctx.Err() != nil {
+			return transient(err) // our timeout or stop, not the network
+		}
+		return transient(netError{err})
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))

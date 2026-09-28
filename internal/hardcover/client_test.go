@@ -125,3 +125,26 @@ func TestTransientErrors(t *testing.T) {
 		t.Errorf("no network: %v not transient", err)
 	}
 }
+
+// After a network failure the client makes no request until Online().
+func TestOfflineMode(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte(`{"data":{}}`))
+	}))
+	defer srv.Close()
+	c := &Client{HTTP: &http.Client{Timeout: time.Second}, Endpoint: "http://127.0.0.1:1",
+		Token: func(context.Context) (string, error) { return "tok", nil }}
+	if err := c.Do(context.Background(), "{x}", nil, nil); !IsTransient(err) || !c.Offline() {
+		t.Fatalf("first: %v offline=%v", err, c.Offline())
+	}
+	c.Endpoint = srv.URL // network "back", but no event yet
+	if err := c.Do(context.Background(), "{x}", nil, nil); !errors.Is(err, errOffline) || calls != 0 {
+		t.Fatalf("while offline: %v, %d calls", err, calls)
+	}
+	c.Online()
+	if err := c.Do(context.Background(), "{x}", nil, nil); err != nil || calls != 1 {
+		t.Fatalf("after Online: %v, %d calls", err, calls)
+	}
+}

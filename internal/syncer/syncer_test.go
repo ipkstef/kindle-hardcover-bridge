@@ -195,3 +195,33 @@ func TestMissCache(t *testing.T) {
 		t.Fatal("miss not expired")
 	}
 }
+
+// Same page as last sent: no API call at all.
+func TestUnchangedPageNoCall(t *testing.T) {
+	f := newFake(2)
+	cache := &BookCache{Path: t.TempDir() + "/bookmap.json"}
+	s := &Syncer{C: f.client(t), Cache: cache, Logf: t.Logf}
+	l := redRising
+	l.Percent = 98.9
+	if _, err := s.Sync(context.Background(), &l); err != nil {
+		t.Fatal(err)
+	}
+	n := len(f.ops)
+	l.Percent = 98.95 // same page 395/400
+	out, err := s.Sync(context.Background(), &l)
+	if err != nil || out.Kind != Unchanged || len(f.ops) != n {
+		t.Fatalf("got %+v %v, calls %v", out, err, f.ops[n:])
+	}
+}
+
+// Reading on in a Paused book moves it to Currently Reading.
+func TestPausedMovesToReading(t *testing.T) {
+	f := newFake(4)
+	s := &Syncer{C: f.client(t), Logf: t.Logf}
+	l := redRising
+	l.Percent = 80
+	out, err := s.Sync(context.Background(), &l)
+	if err != nil || out.Added != "moved from Paused" {
+		t.Fatalf("got %+v %v", out, err)
+	}
+}

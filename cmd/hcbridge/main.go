@@ -23,9 +23,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/certs"
@@ -35,6 +37,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/metrics"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/screen"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/store"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/syncer"
 )
 
@@ -62,6 +65,9 @@ type app struct {
 	hc    *hardcover.Client // one per process: rate limiter + cached "me"
 	sy    *syncer.Syncer
 	tokMu sync.Mutex
+
+	sdb       *store.Store
+	sdbFailed bool
 }
 
 func main() {
@@ -121,6 +127,9 @@ func main() {
 	default:
 		err = fmt.Errorf("unknown command %q", cmd)
 	}
+	if a.sdb != nil {
+		a.sdb.Close()
+	}
 	if err != nil {
 		log.Printf("%s: error: %v", cmd, err)
 		msg := err.Error()
@@ -165,8 +174,32 @@ func (a *app) login(ctx context.Context) error {
 		return fmt.Errorf("signed in, but 'me' failed: %w", err)
 	}
 	log.Printf("login: OK as %s (id %d), scope %q", me.Username, me.ID, tok.Scope)
-	a.screen.Show("Signed in as @"+me.Username+".", "", "", "", "", "", "", "")
+	msg := "Background sync is ON."
+	if err := a.startDaemon(); err != nil {
+		log.Printf("login: start daemon: %v", err)
+		msg = "Tap 'Start background sync'."
+	}
+	a.screen.Show("Signed in as @"+me.Username+".", msg, "",
+		"Tip: unlink Goodreads on the Kindle",
+		"(Settings > Your Account) to avoid",
+		"Goodreads error boxes. Ratings still", "go to Hardcover.", "")
 	return nil
+}
+
+// startDaemon starts "hcbridge daemon" as its own background process (new
+// session, output to the log), like the menu's "Start background sync".
+func (a *app) startDaemon() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	args := append([]string{"daemon"}, os.Args[2:]...) // same flags (client ID, paths)
+	cmd := exec.Command(exe, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
 }
 
 func (a *app) whoami(ctx context.Context) error {
@@ -181,7 +214,7 @@ func (a *app) whoami(ctx context.Context) error {
 func (a *app) syncer() *syncer.Syncer {
 	if a.sy == nil {
 		a.sy = &syncer.Syncer{C: a.client(), Logf: log.Printf,
-			Cache: &syncer.BookCache{Path: filepath.Join(a.stateDir, "bookmap.json")}}
+			Cache: &syncer.BookCache{Path: filepath.Join(a.stateDir, "bookmap.json"), DB: a.stateDB()}}
 	}
 	return a.sy
 }
@@ -233,14 +266,30 @@ func (a *app) syncNow(ctx context.Context) error {
 	return nil
 }
 
+// stateDB opens the state database once (/var/local/hcbridge/hcbridge.db).
+// If it cannot be opened, the JSON files are used (capability model: a
+// missing backend never stops the daemon).
+func (a *app) stateDB() *store.Store {
+	if a.sdb == nil && !a.sdbFailed {
+		s, err := store.Open(filepath.Join(a.stateDir, "hcbridge.db"))
+		if err != nil {
+			log.Printf("state db: %v (using JSON files)", err)
+			a.sdbFailed = true
+			return nil
+		}
+		a.sdb = s
+	}
+	return a.sdb
+}
+
 func (a *app) clipSync() *syncer.ClipSync {
 	return &syncer.ClipSync{S: a.syncer(), Books: a.db, Path: clippings.DefaultPath,
-		StatePath: filepath.Join(a.stateDir, "clips.json")}
+		StatePath: filepath.Join(a.stateDir, "clips.json"), DB: a.stateDB()}
 }
 
 func (a *app) rateSync() *syncer.RateSync {
 	return &syncer.RateSync{S: a.syncer(), Books: a.db, Path: metrics.DefaultPath, SyncShelves: syncShelves,
-		StatePath: filepath.Join(a.stateDir, "ratings.json")}
+		StatePath: filepath.Join(a.stateDir, "ratings.json"), DB: a.stateDB()}
 }
 
 func (a *app) clipsNow(ctx context.Context, all bool) error {

@@ -17,6 +17,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/atomicfile"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/readers"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/store"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/syncer"
 )
 
@@ -47,13 +48,18 @@ type State struct {
 type Daemon struct {
 	Src         Source
 	Sync        Syncer
-	StatePath   string
+	StatePath   string       // JSON state (used when DB is nil; imported into DB once)
+	DB          *store.Store // optional state database
 	Logf        func(string, ...any)
 	MaxAttempts int // give up on one percent value after this many errors
 	// After runs at the end of each scan (e.g. highlight/note sync).
 	After func(ctx context.Context)
+	// Offline reports that the network is known to be down. Then changed
+	// books are only marked pending: no book look-up, no log per event.
+	Offline func() bool
 
 	mu      sync.Mutex
+	db      *dbState
 	state   *State
 	saved   string    // fingerprint of the state last written
 	savedAt time.Time // when it was written
@@ -89,7 +95,13 @@ func (d *Daemon) save() error {
 	if fp == d.saved && time.Since(d.savedAt) < saveInterval {
 		return nil // nothing changed: no flash write
 	}
-	if err := atomicfile.GuardedJSON(d.StatePath, d.state, 0o600); err != nil {
+	var err error
+	if d.db != nil {
+		err = d.db.save(d.state)
+	} else {
+		err = atomicfile.GuardedJSON(d.StatePath, d.state, 0o600)
+	}
+	if err != nil {
 		return err
 	}
 	d.saved, d.savedAt = fp, time.Now()
@@ -119,7 +131,14 @@ func (d *Daemon) scan(ctx context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.state == nil {
-		st, err := LoadState(d.StatePath)
+		var st *State
+		var err error
+		if d.DB != nil {
+			d.db = newDBState(d.DB)
+			st, err = d.db.load(d.StatePath)
+		} else {
+			st, err = LoadState(d.StatePath)
+		}
 		if err != nil {
 			return err
 		}
@@ -218,6 +237,13 @@ func (d *Daemon) scan(ctx context.Context) error {
 				continue
 			}
 		}
+		if d.Offline != nil && d.Offline() {
+			if _, ok := st.Pending[k]; !ok {
+				st.Pending[k] = 0
+				d.Logf("daemon: book %s changed, offline: will send when Wi-Fi is back", short(k))
+			}
+			continue
+		}
 		local, err := d.Src.BookByKey(ctx, k)
 		if err != nil {
 			d.Logf("daemon: book %s: %v", short(k), err)
@@ -235,9 +261,9 @@ func (d *Daemon) scan(ctx context.Context) error {
 			// No network or no sign-in: keep it, without counting an attempt.
 			// The other changed books would fail the same way; their snapshot
 			// is not updated, so the next scan finds them again.
-			d.Logf("daemon: %q: waiting (%v), will retry", local.Title, err)
 			if _, ok := st.Pending[k]; !ok {
 				st.Pending[k] = 0
+				d.Logf("daemon: %q: waiting (%v), will retry", local.Title, err)
 			}
 			st.LastResult = "waiting: " + err.Error()
 			break

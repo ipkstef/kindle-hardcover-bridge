@@ -13,6 +13,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/clippings"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/mobi"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/store"
 )
 
 // Books is the part of the cc.db reader the clip sync needs.
@@ -33,9 +34,21 @@ type ClipState struct {
 type ClipSync struct {
 	S         *Syncer
 	Books     Books
-	Path      string // My Clippings.txt
-	StatePath string
+	Path      string       // My Clippings.txt
+	StatePath string       // JSON state (used when DB is nil; imported once)
+	DB        *store.Store // optional
+
+	sent *store.Table[int]
 }
+
+// clipMeta is the small part of ClipState, read before the sent list.
+type clipMeta struct {
+	Baseline bool      `json:"baseline"`
+	Size     int64     `json:"size"`
+	ModTime  time.Time `json:"mod_time"`
+}
+
+const kvClips = "clips.meta"
 
 // Run sends new clippings. With all=true, clippings recorded as baseline are
 // sent too (import of old highlights). It does nothing if the file did not
@@ -48,10 +61,12 @@ func (c *ClipSync) Run(ctx context.Context, all bool) (sent int, err error) {
 	if err != nil {
 		return 0, err // e.g. /mnt/us not mounted (USB mode): retry later
 	}
-	st := c.load()
-	if !all && st.Baseline && fi.Size() == st.Size && fi.ModTime().Equal(st.ModTime) {
+	// Cheap check first: the sent list (can be thousands of rows) is read
+	// only when My Clippings.txt changed.
+	if m := c.meta(); !all && m.Baseline && fi.Size() == m.Size && fi.ModTime().Equal(m.ModTime) {
 		return 0, nil
 	}
+	st := c.load()
 	f, err := os.Open(c.Path)
 	if err != nil {
 		return 0, err
@@ -279,9 +294,41 @@ func locationToPage(loc int, textLen int64, pages int) int {
 	return book.PercentToPage(min(pct, 100), pages)
 }
 
+func (c *ClipSync) meta() clipMeta {
+	if c.DB != nil {
+		c.importJSON()
+		var m clipMeta
+		c.DB.GetJSON(kvClips, &m)
+		return m
+	}
+	st := c.load()
+	return clipMeta{st.Baseline, st.Size, st.ModTime}
+}
+
+func (c *ClipSync) importJSON() {
+	if c.sent == nil {
+		c.sent = store.NewTable[int](c.DB, store.TClips)
+	}
+	_ = c.DB.ImportJSON("clips.json", c.StatePath, func(b []byte) error {
+		var st ClipState
+		if json.Unmarshal(b, &st) != nil {
+			return nil
+		}
+		if err := c.sent.Save(st.Sent); err != nil {
+			return err
+		}
+		return c.DB.SetJSON(kvClips, clipMeta{st.Baseline, st.Size, st.ModTime})
+	})
+}
+
 func (c *ClipSync) load() *ClipState {
 	st := &ClipState{}
-	if b, err := os.ReadFile(c.StatePath); err == nil {
+	if c.DB != nil {
+		c.importJSON()
+		m := c.meta()
+		st.Baseline, st.Size, st.ModTime = m.Baseline, m.Size, m.ModTime
+		st.Sent, _ = c.sent.Load()
+	} else if b, err := os.ReadFile(c.StatePath); err == nil {
 		_ = json.Unmarshal(b, st)
 	}
 	if st.Sent == nil {
@@ -290,8 +337,22 @@ func (c *ClipSync) load() *ClipState {
 	return st
 }
 
+// save writes the state. With the DB only new or removed clips are
+// written, with the meta, in one transaction.
 func (c *ClipSync) save(st *ClipState) error {
-	return atomicfile.GuardedJSON(c.StatePath, st, 0o600)
+	if c.DB == nil {
+		return atomicfile.GuardedJSON(c.StatePath, st, 0o600)
+	}
+	ops, commit, err := c.sent.Diff(st.Sent)
+	if err != nil {
+		return err
+	}
+	b, _ := json.Marshal(clipMeta{st.Baseline, st.Size, st.ModTime})
+	if err := c.DB.Apply(append(ops, store.SetOp(kvClips, string(b)))...); err != nil {
+		return err
+	}
+	commit()
+	return nil
 }
 
 // Note/highlight pairing. On the Kindle, a note on a highlight is saved as

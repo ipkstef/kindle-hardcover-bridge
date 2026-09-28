@@ -1,6 +1,6 @@
 # Decision: embedded database for daemon state
 
-Status: **proposed** (2026-09-28). Implementation is "Later" (user: core first).
+Status: **built** (2026-09-28, `internal/store`). Settings changed from the first proposal: see "As built".
 
 ## Context
 Daemon state today is JSON files in `/var/local/hcbridge/` (ext3, persistent):
@@ -46,3 +46,23 @@ rename them `*.migrated`.
 
 Pinned version: `modernc.org/sqlite v1.38.2` (needs Go 1.23; newest
 versions need newer Go — keep pinned until the Go/kernel floor is decided).
+
+## As built (2026-09-28)
+- File `/var/local/hcbridge/hcbridge.db` (0600). Why `/var/local`: ext3,
+  kept across restarts, where Amazon keeps `cc.db`; `/mnt/us` is FAT and is
+  unmounted in USB mode (the daemon keeps running), `/tmp` is RAM, rootfs is
+  read-only and replaced by updates. 5 MB free-space guard stays.
+- **WAL + `synchronous=NORMAL`** (not DELETE+FULL): fewest flash flushes per
+  write; a power loss can lose the last write, never damages the file.
+  `cache_size=-256` (256 KB), `temp_store=MEMORY`, one connection kept open,
+  `wal_checkpoint(TRUNCATE)` on exit.
+- Tables are `(k TEXT PRIMARY KEY, v TEXT) WITHOUT ROWID`, value = JSON of
+  the row: `kv`, `progress`, `pending`, `finished`, `book_map`,
+  `clips_sent`, `ratings`. Read once into memory; saved **by diff** (only
+  changed rows, one transaction). `clips_sent` is read only when
+  `My Clippings.txt` changed.
+- `book_map` also holds the last page sent → no API call when the page is
+  unchanged.
+- Old JSON files are imported once and renamed `*.migrated`. If the DB
+  cannot be opened, the JSON files are used (capability model).
+- `token.json` stays a separate 0600 file.

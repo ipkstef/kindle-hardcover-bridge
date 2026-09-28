@@ -112,6 +112,8 @@ func StatusName(id int) string {
 		return "Read"
 	case hardcover.StatusDNF:
 		return "Did Not Finish"
+	case hardcover.StatusPaused:
+		return "Paused"
 	}
 	return fmt.Sprintf("status %d", id)
 }
@@ -194,6 +196,15 @@ func (s *Syncer) Resolve(ctx context.Context, local *book.Local) (*match.Result,
 	return res, nil
 }
 
+// sent records the page last sent or checked (see BookMap.LastPage).
+func (s *Syncer) sent(key string, page, pages int) {
+	if s.Cache != nil && key != "" && pages > 0 {
+		if err := s.Cache.SetSent(key, page, pages); err != nil {
+			s.logf("sync: cache: %v", err)
+		}
+	}
+}
+
 func (s *Syncer) missed(key string) (time.Time, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -271,6 +282,16 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 		cp.Percent = pct
 		local = &cp
 	}
+	// Same page as the last one sent (or checked) for this edition: nothing
+	// to do, no API call. Most go-Home / sleep events move less than a page.
+	if !finished && s.Cache != nil && local.Key != "" {
+		if m, ok := s.Cache.Get(local.Key); ok && m.LastPages > 0 {
+			if page := book.PercentToPage(pct, m.LastPages); page == m.LastPage {
+				s.logf("sync: page %d/%d unchanged since last sync, no API call", page, m.LastPages)
+				return Outcome{Kind: Unchanged, Title: m.Title, Page: page, Pages: m.LastPages}, nil
+			}
+		}
+	}
 	res, ub, err := s.Identify(ctx, local)
 	if errors.Is(err, ErrNotFound) {
 		s.notFound(local)
@@ -293,17 +314,25 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 		}
 		s.logf("sync: auto-added book %d to Currently Reading (user_book %d)", res.BookID, nub.ID)
 		ub, added = nub, "added to Currently Reading"
-	case ub.StatusID == hardcover.StatusWantToRead:
+	case ub.StatusID == hardcover.StatusWantToRead || ub.StatusID == hardcover.StatusPaused ||
+		ub.StatusID == hardcover.StatusDNF:
+		// Reading on the Kindle: Want to Read, Paused and Did Not Finish move
+		// to Currently Reading (user decision 2026-09-28). Setting Paused /
+		// DNF stays on the Hardcover website.
+		from := StatusName(ub.StatusID)
 		nub, err := s.C.SetStatus(ctx, ub.ID, hardcover.StatusReading)
 		if err != nil {
 			return Outcome{}, err
 		}
-		s.logf("sync: moved user_book %d from Want to Read to Currently Reading", ub.ID)
-		ub, added = nub, "moved from Want to Read"
+		s.logf("sync: moved user_book %d from %s to Currently Reading", ub.ID, from)
+		ub, added = nub, "moved from "+from
 	case ub.StatusID == hardcover.StatusRead && pct < RestartPercent:
 		// Finished on Hardcover, back at the start on the Kindle: a re-read
 		// (user decision 2026-09-28).
 		out, _, err := s.Reread(ctx, local, res, ub, pct)
+		if err == nil {
+			s.sent(local.Key, out.Page, out.Pages)
+		}
 		return out, err
 	case ub.StatusID != hardcover.StatusReading:
 		return skip(res.Title, "shelf is "+StatusName(ub.StatusID))
@@ -354,6 +383,9 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 		s.logf("sync: new read %d at page %d/%d", r.ID, page, pages)
 		out.Kind = Sent
 	}
+	// Only after a success (an error returned above): a failed send must be
+	// tried again, not skipped as "unchanged".
+	s.sent(local.Key, page, pages)
 	return out, nil
 }
 

@@ -109,8 +109,13 @@ status sync **off** (`syncShelves`), telemetry and SQLite DB later
 ~1–2 s after a star tap; Goodreads unlinked on the Kindle works better
 (stars still recorded, no error). b3b70fe **works on device**: star
 change without X (`update_rating`), duplicate books (readers lead), "Last,
-First" authors, sleep-in-book sync, clips. Core is done. Open: autostart /
-no-KUAL install, SQLite state DB, old-kernel device check.
+First" authors, sleep-in-book sync, clips. Core is done. Built next
+(not yet on device): SQLite state store (`internal/store`, see
+docs/decisions/embedded-db.md), no API call when the page is unchanged,
+offline mode (no network tries until Wi-Fi is back), hourly event summary
+in the log, Paused/DNF → Currently Reading on progress, daemon auto-starts
+after sign-in. Open: autostart at boot / no-KUAL install, public client ID
+decision, old-kernel device check.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

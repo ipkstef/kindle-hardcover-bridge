@@ -11,6 +11,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/clippings"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/store"
 )
 
 type fakeBooks struct{}
@@ -23,7 +24,10 @@ func (fakeBooks) BooksByTitle(_ context.Context, title string) ([]*book.Local, e
 	return []*book.Local{&l}, nil
 }
 
-func TestClipSync(t *testing.T) {
+func TestClipSync(t *testing.T)   { testClipSync(t, false) }
+func TestClipSyncDB(t *testing.T) { testClipSync(t, true) }
+
+func testClipSync(t *testing.T, useDB bool) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "My Clippings.txt")
 	dev, err := os.ReadFile("../clippings/testdata/My Clippings.txt")
@@ -35,6 +39,14 @@ func TestClipSync(t *testing.T) {
 	f := newFake(2)
 	cs := &ClipSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
 		Path: path, StatePath: filepath.Join(dir, "clips.json")}
+	if useDB {
+		db, err := store.Open(filepath.Join(dir, "hcbridge.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		cs.DB = db
+	}
 
 	// First run: baseline only, nothing sent.
 	if n, err := cs.Run(context.Background(), false); err != nil || n != 0 || len(f.ops) != 0 {
