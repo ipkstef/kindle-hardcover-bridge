@@ -99,8 +99,14 @@ func BuildIdentity(l Local, meta *mobi.Meta) Identity {
 			}
 		}
 	}
-	for _, i := range FindISBNs(l.Key) {
-		add(KindISBN13, i, "cc.cdeKey", true)
+	// The key is an ISBN only when the whole key is one: a Calibre UUID
+	// holds ISBN-like digit runs by chance (0.37 % of keys, review
+	// 2026-09-28), and a dedicated-field hit is accepted even when the
+	// title differs.
+	if k := strings.ReplaceAll(strings.TrimSpace(l.Key), "-", ""); ValidISBN13(k) {
+		add(KindISBN13, k, "cc.cdeKey", true)
+	} else if ValidISBN10(k) {
+		add(KindISBN13, ISBN10To13(k), "cc.cdeKey", true)
 	}
 	base := filepath.Base(l.Path)
 	for _, i := range FindISBNsStrict(base) {

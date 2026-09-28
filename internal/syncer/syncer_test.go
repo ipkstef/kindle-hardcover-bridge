@@ -180,3 +180,18 @@ func TestRereadOnRestart(t *testing.T) {
 		t.Fatalf("order %v", f.ops)
 	}
 }
+
+func TestMissCache(t *testing.T) {
+	s := &Syncer{}
+	if _, ok := s.missed("k"); ok {
+		t.Fatal("missed before any miss")
+	}
+	s.miss("k")
+	if _, ok := s.missed("k"); !ok {
+		t.Fatal("miss not remembered")
+	}
+	s.misses["k"] = time.Now().Add(-missTTL - time.Minute)
+	if _, ok := s.missed("k"); ok {
+		t.Fatal("miss not expired")
+	}
+}

@@ -260,7 +260,12 @@ func (c *ClipSync) findLocal(ctx context.Context, title, author string) *book.Lo
 			}
 		}
 	}
-	return books[0]
+	// No author match: use the book only when there is no doubt (never send
+	// notes to another book with the same title).
+	if len(books) == 1 {
+		return books[0]
+	}
+	return nil
 }
 
 // locationToPage maps a Kindle location to a page of the Hardcover edition.

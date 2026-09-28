@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
@@ -29,6 +30,20 @@ const RestartPercent = 5.0
 // back to the start (device log 2026-09-28), so a steady 2 is not a finish.
 func IsFinished(pct float64, readState int) bool {
 	return pct > FinishedPercent || readState == 2
+}
+
+// errClock: the clock is not set (e.g. after the battery ran empty). Dated
+// writes wait until the Kindle sets it from the network. It is temporary.
+var errClock = fmt.Errorf("%w: device clock not set", hardcover.ErrTransient)
+
+// today is the date for started_at / finished_at, or errClock when the clock
+// is clearly wrong (before this code was written).
+func today() (string, error) {
+	now := time.Now()
+	if now.Year() < 2026 {
+		return "", errClock
+	}
+	return now.Format("2006-01-02"), nil
 }
 
 // ErrNotFound means the waterfall found no confident match.
@@ -66,7 +81,19 @@ type Syncer struct {
 	C     *hardcover.Client
 	Cache *BookCache // optional
 	Logf  func(format string, a ...any)
+	// OnNotFound is called once per book when its progress cannot be sent
+	// because no single Hardcover book matches (daemon: tell the user).
+	OnNotFound func(title string)
+
+	mu     sync.Mutex
+	misses map[string]time.Time // book key → last "not found" (missTTL)
+	told   map[string]bool      // OnNotFound already called
 }
+
+// missTTL: a book that was not found is not looked up again for this long
+// (each look-up can cost a library download and searches). A new process
+// (menu command, daemon restart) starts with no misses.
+const missTTL = time.Hour
 
 func (s *Syncer) logf(f string, a ...any) {
 	if s.Logf != nil {
@@ -116,6 +143,11 @@ func (s *Syncer) Identify(ctx context.Context, local *book.Local) (*match.Result
 // Resolve finds the Hardcover book: from the match cache, else with the
 // match waterfall (then cached). No shelf lookup.
 func (s *Syncer) Resolve(ctx context.Context, local *book.Local) (*match.Result, error) {
+	if at, ok := s.missed(local.Key); ok {
+		s.logf("identify: %q: not found at %s, next look-up after %s", local.Title,
+			at.Format("15:04"), at.Add(missTTL).Format("Jan 2 15:04"))
+		return nil, ErrNotFound
+	}
 	if s.Cache != nil && local.Key != "" {
 		if m, ok := s.Cache.Get(local.Key); ok {
 			return &match.Result{BookID: m.BookID, EditionID: m.EditionID, Pages: m.Pages,
@@ -150,6 +182,7 @@ func (s *Syncer) Resolve(ctx context.Context, local *book.Local) (*match.Result,
 		return nil, err
 	}
 	if res == nil {
+		s.miss(local.Key)
 		return nil, ErrNotFound
 	}
 	if s.Cache != nil && local.Key != "" {
@@ -159,6 +192,42 @@ func (s *Syncer) Resolve(ctx context.Context, local *book.Local) (*match.Result,
 		}
 	}
 	return res, nil
+}
+
+func (s *Syncer) missed(key string) (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at, ok := s.misses[key]
+	return at, ok && key != "" && time.Since(at) < missTTL
+}
+
+func (s *Syncer) miss(key string) {
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.misses == nil {
+		s.misses = map[string]time.Time{}
+	}
+	s.misses[key] = time.Now()
+}
+
+// notFound calls OnNotFound once per book.
+func (s *Syncer) notFound(local *book.Local) {
+	if s.OnNotFound == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.told == nil {
+		s.told = map[string]bool{}
+	}
+	seen := s.told[local.Key]
+	s.told[local.Key] = true
+	s.mu.Unlock()
+	if !seen {
+		s.OnNotFound(local.Title)
+	}
 }
 
 // Sync sends the book's progress. Rules:
@@ -185,7 +254,14 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 	for _, n := range notes {
 		s.logf("position: %s", n)
 	}
-	finished := IsFinished(pct, local.ReadState)
+	// Finish only from the Kindle's own values: a sidecar position divided by
+	// a text length of another format part can give 100 % by mistake
+	// (review 2026-09-28).
+	finPct := pct
+	if src == SrcSidecar {
+		finPct = 0
+	}
+	finished := IsFinished(finPct, local.ReadState)
 	if pct <= 0 && !finished {
 		return skip(local.Title, "book not started on the Kindle")
 	}
@@ -197,6 +273,7 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 	}
 	res, ub, err := s.Identify(ctx, local)
 	if errors.Is(err, ErrNotFound) {
+		s.notFound(local)
 		return skip(local.Title, "book not found on Hardcover")
 	}
 	if err != nil {
@@ -266,7 +343,10 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 		s.logf("sync: updated read %d to page %d/%d", read.ID, page, pages)
 		out.Kind = Sent
 	default:
-		today := time.Now().Format("2006-01-02")
+		today, err := today()
+		if err != nil {
+			return Outcome{}, err
+		}
 		r, err := s.C.InsertRead(ctx, ub.ID, page, editionID, today)
 		if err != nil {
 			return Outcome{}, err
@@ -305,7 +385,10 @@ func (s *Syncer) addUserBook(ctx context.Context, res *match.Result, status int)
 // read (last page + finished_at), then set status Read, so Hardcover does not
 // add a second, empty finished read.
 func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Result, ub *hardcover.UserBook) (Outcome, *hardcover.UserBook, error) {
-	today := time.Now().Format("2006-01-02")
+	today, err := today()
+	if err != nil {
+		return Outcome{}, nil, err
+	}
 	out := Outcome{Kind: Sent, Title: res.Title, Finished: true}
 	switch {
 	case ub != nil && ub.StatusID == hardcover.StatusRead:
@@ -376,7 +459,10 @@ func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Resul
 // answer holds the entry's reads), then use an open read if Hardcover made
 // one, else add a new read with today's date.
 func (s *Syncer) Reread(ctx context.Context, local *book.Local, res *match.Result, ub *hardcover.UserBook, pct float64) (Outcome, *hardcover.UserBook, error) {
-	today := time.Now().Format("2006-01-02")
+	today, err := today()
+	if err != nil {
+		return Outcome{}, nil, err
+	}
 	if ub == nil {
 		nub, err := s.addUserBook(ctx, res, hardcover.StatusReading)
 		if err != nil {

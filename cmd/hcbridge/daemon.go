@@ -171,6 +171,10 @@ func (a *app) daemon(ctx context.Context) error {
 		}
 		go ratingAlert(ctx, text)
 	}
+	a.syncer().OnNotFound = func(title string) {
+		go ratingAlert(ctx, title+" was not found on Hardcover, or matches more than one book there. "+
+			"Add the right book to a shelf on hardcover.app; it syncs within an hour.")
+	}
 	runRatings := func(ctx context.Context) {
 		if n, err := ratings.Run(ctx); err != nil {
 			log.Printf("daemon: ratings: %v (retry at next check)", err)

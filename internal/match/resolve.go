@@ -5,7 +5,7 @@
 //  2. ISBN-13/10  → editions.isbn_13 / isbn_10
 //  3. the user's own library, by title + author
 //  4. catalog search, by title + author (one exact hit, or one hit with the
-//     same year)
+//     same year, or one with a clear lead in readers: duplicates)
 //  5. else: no match. Never guess.
 //
 // An ID hit is accepted only if it points to exactly one book. IDs found in
@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
@@ -158,21 +159,29 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Lib
 			h := hits[m[0]]
 			logf("search %q: book %d %q", q, h.ID, h.Title)
 			return &Result{BookID: h.ID, Title: h.Title, Method: "search", Via: q}, steps, nil
-		case len(m) > 1 && id.Year > 0:
-			var same []int
-			for _, i := range m {
-				if y := hits[i].ReleaseYear; y != nil && *y == id.Year {
-					same = append(same, i)
+		case len(m) > 1:
+			if id.Year > 0 {
+				var same []int
+				for _, i := range m {
+					if y := hits[i].ReleaseYear; y != nil && *y == id.Year {
+						same = append(same, i)
+					}
+				}
+				if len(same) == 1 {
+					h := hits[same[0]]
+					logf("search %q: %d matches, 1 with year %d: book %d %q", q, len(m), id.Year, h.ID, h.Title)
+					return &Result{BookID: h.ID, Title: h.Title, Method: "search+year", Via: q}, steps, nil
+				}
+				if len(same) > 1 {
+					m = same
 				}
 			}
-			if len(same) == 1 {
-				h := hits[same[0]]
-				logf("search %q: %d matches, 1 with year %d: book %d %q", q, len(m), id.Year, h.ID, h.Title)
-				return &Result{BookID: h.ID, Title: h.Title, Method: "search+year", Via: q}, steps, nil
+			if i, ok := clearWinner(hits, m); ok {
+				h := hits[i]
+				logf("search %q: %d matches, book %d %q has most readers (%d)", q, len(m), h.ID, h.Title, readers(h))
+				return &Result{BookID: h.ID, Title: h.Title, Method: "search+readers", Via: q}, steps, nil
 			}
-			logf("search %q: %d matches, %d with year %d, skipped", q, len(m), len(same), id.Year)
-		case len(m) > 1:
-			logf("search %q: %d matches and no year to choose, skipped", q, len(m))
+			logf("search %q: %d matches (readers %s), no clear choice, skipped", q, len(m), readerList(hits, m))
 		default:
 			logf("search %q: %d results, no exact title+author match", q, len(hits))
 		}
@@ -185,6 +194,49 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, loadLibrary Lib
 // to a weaker step or end as "not found": the caller tries again later.
 func stop(err error) bool {
 	return errors.Is(err, hardcover.ErrUnauthorized) || hardcover.IsTransient(err)
+}
+
+// Duplicate Hardcover entries: one main book with many readers, copies with
+// almost none. The top match is taken only with a clear lead, so two real
+// books with the same title and author are never guessed between.
+const (
+	minReaders  = 20 // the winner has at least this many readers
+	readersLead = 10 // and this many times the readers of the next one
+)
+
+func readers(h hardcover.BookHit) int {
+	if h.UsersRead == nil {
+		return 0
+	}
+	return *h.UsersRead
+}
+
+// clearWinner returns the match with a clear lead in readers.
+func clearWinner(hits []hardcover.BookHit, m []int) (int, bool) {
+	best, second := -1, 0
+	for _, i := range m {
+		switch r := readers(hits[i]); {
+		case best < 0 || r > readers(hits[best]):
+			if best >= 0 {
+				second = max(second, readers(hits[best]))
+			}
+			best = i
+		default:
+			second = max(second, r)
+		}
+	}
+	if best < 0 || readers(hits[best]) < minReaders || readers(hits[best]) < readersLead*second {
+		return 0, false
+	}
+	return best, true
+}
+
+func readerList(hits []hardcover.BookHit, m []int) string {
+	var parts []string
+	for _, i := range m {
+		parts = append(parts, fmt.Sprintf("%d:%d", hits[i].ID, readers(hits[i])))
+	}
+	return strings.Join(parts, " ")
 }
 
 type lookup struct{ field, value string }

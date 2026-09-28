@@ -29,7 +29,7 @@ type BookMap struct {
 // byTitle reports if the match came from a title compare, not an ID.
 func (m BookMap) byTitle() bool {
 	switch m.Method {
-	case "library", "search", "search+year":
+	case "library", "search", "search+year", "search+readers":
 		return true
 	}
 	return false

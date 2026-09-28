@@ -134,3 +134,10 @@ Proposed rule (**to confirm with a test**):
 - (old note) **Rating Error dialog (approved: B + C):** close the stock error dialog
   after a star tap (window manager, format UNVERIFIED), then show a short
   "Saved to Hardcover" message. Dialog state research is in the daemon log.
+
+## Book matching: 2 matching books (built 2026-09-28)
+Search step, when several books match title + author: (1) the one with the
+file's year; (2) else the one with a clear lead in readers (≥ 20 readers and
+≥ 10× the next: Hardcover duplicates); (3) else skip, show a box once per
+book ("…add the right book to a shelf on hardcover.app"), and do not look
+the book up again for 1 h (miss cache, also saves API calls).

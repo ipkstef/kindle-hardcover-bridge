@@ -151,3 +151,21 @@ func TestTransientStops(t *testing.T) {
 		t.Fatalf("got %+v, %v, library called %v", r, err, libCalled)
 	}
 }
+
+func TestClearWinnerByReaders(t *testing.T) {
+	n := func(v int) *int { return &v }
+	hits := []hardcover.BookHit{{ID: 1, UsersRead: n(400)}, {ID: 2, UsersRead: n(3)}, {ID: 3, UsersRead: nil}}
+	if i, ok := clearWinner(hits, []int{0, 1, 2}); !ok || i != 0 {
+		t.Fatalf("got %d %v", i, ok)
+	}
+	// Two real books: no clear lead.
+	hits[1].UsersRead = n(100)
+	if _, ok := clearWinner(hits, []int{0, 1}); ok {
+		t.Fatal("picked without a clear lead")
+	}
+	// Too few readers to be sure.
+	hits = []hardcover.BookHit{{ID: 1, UsersRead: n(9)}, {ID: 2, UsersRead: n(0)}}
+	if _, ok := clearWinner(hits, []int{0, 1}); ok {
+		t.Fatal("picked with too few readers")
+	}
+}

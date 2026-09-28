@@ -26,6 +26,9 @@ func LIPC(ctx context.Context, publisher string, onLine func(string), logf func(
 		for ctx.Err() == nil {
 			start := time.Now()
 			cmd := exec.CommandContext(ctx, bin, "-m", publisher, "*")
+			// The child dies with the daemon (else it stays until its next
+			// event).
+			cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 			out, err := cmd.StdoutPipe()
 			if err == nil {
 				err = cmd.Start()
@@ -71,7 +74,9 @@ const (
 // channel is closed when the watch ends: ctx done, or the folder is gone or
 // unmounted (e.g. /mnt/us in USB mode); the caller may then watch again.
 func WatchDir(ctx context.Context, dir string, onEvent func(name string, mask uint32)) (<-chan struct{}, error) {
-	fd, err := syscall.InotifyInit()
+	// CLOEXEC: child processes (lipc-wait-event, lipc-get-prop) must not
+	// inherit the watch.
+	fd, err := syscall.InotifyInit1(syscall.IN_CLOEXEC)
 	if err != nil {
 		return nil, err
 	}

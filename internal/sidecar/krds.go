@@ -98,9 +98,12 @@ func (o *Object) FirstString() (string, bool) {
 }
 
 type parser struct {
-	b []byte
-	i int
+	b     []byte
+	i     int
+	depth int // nested objects; capped so a bad file cannot use much memory
 }
+
+const maxDepth = 64
 
 var errShort = errors.New("sidecar: truncated KRDS data")
 
@@ -191,6 +194,10 @@ func (p *parser) value() (any, error) {
 		}
 		return binary.BigEndian.Uint16(b), nil
 	case tBegin:
+		if p.depth++; p.depth > maxDepth {
+			return nil, errors.New("sidecar: KRDS nesting too deep")
+		}
+		defer func() { p.depth-- }()
 		name, err := p.utf()
 		if err != nil {
 			return nil, err

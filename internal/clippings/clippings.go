@@ -92,7 +92,7 @@ var (
 // Parse reads all entries. Broken entries are skipped.
 func Parse(r io.Reader) ([]Clip, error) {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	sc.Buffer(make([]byte, 64<<10), 16<<20) // one very long note must not stop all clips
 	var out []Clip
 	var block []string
 	flush := func() {
