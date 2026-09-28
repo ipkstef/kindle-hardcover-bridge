@@ -44,3 +44,18 @@ Books: `p_type = 'Entry:Item'`, `p_cdeType` in (`EBOK`, `PDOC`).
    **UNVERIFIED** if Calibre wrote ISBNs into these files.
 3. Still unknown: **when** `p_percentFinished` is written (each page turn,
    on sleep, or on book close).
+
+## Watch test 1 (2026-09-28, 01:31–01:38 UTC)
+User opened a book, turned pages (+1 % on screen), stayed in the book, did
+not go Home, did not sleep, then connected USB.
+
+- On book open: sidecar `.azw3r` written (01:31:41), then `cc.db` written
+  (01:31:44, `p_lastAccess` updated).
+- While reading for 7 min with +1 % progress: **no write** to `cc.db` or the
+  sidecar. `p_percentFinished` stayed at the old value.
+- Connecting USB stopped the watch loop (no "end" line). `/mnt/us` is
+  unmounted in USB mode. The daemon must not depend on `/mnt/us` while
+  running (**UNVERIFIED** that the process is killed, not only its log).
+
+Conclusion: progress is **not** written on page turn. Still to test: go Home
+(book close) and sleep.
