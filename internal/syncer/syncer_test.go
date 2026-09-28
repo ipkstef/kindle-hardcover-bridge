@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
@@ -130,5 +131,25 @@ func TestProgressNotFinished(t *testing.T) {
 	out, err := s.Sync(context.Background(), &l)
 	if err != nil || out.Finished || out.Page != 395 {
 		t.Fatalf("got %+v %v", out, err)
+	}
+}
+
+func TestFinishNotTwiceSameDay(t *testing.T) {
+	f := newFake(2)
+	today := time.Now().Format("2006-01-02")
+	ub := strings.Replace(ubJSON, "%d", "2", 1)
+	ub = strings.Replace(ub, `"finished_at":null`, `"finished_at":"`+today+`"`, 1)
+	f.reply["user_books(where: {user_id"] = `{"data":{"user_books":[` + ub + `]}}`
+	f.reply["user_books(where: {id"] = `{"data":{"user_books":[` + ub + `]}}`
+	s := &Syncer{C: f.client(t), Logf: t.Logf}
+	l := redRising
+	l.Percent, l.ReadState = 98.22, 2
+	if _, err := s.Sync(context.Background(), &l); err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range f.ops {
+		if op == "update_user_book_read" || op == "insert_user_book_read" {
+			t.Fatalf("touched reads: %v", f.ops)
+		}
 	}
 }

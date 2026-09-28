@@ -45,10 +45,19 @@ type Clip struct {
 	LocEnd   int
 	Added    time.Time // zero if the date could not be read
 	Text     string
+
+	key string // ID fixed at parse time, so later text changes keep it
 }
 
-// ID is a stable hash of the entry, to send it only once.
+// ID is a stable hash of the entry as read from the file, to send it only once.
 func (c Clip) ID() string {
+	if c.key != "" {
+		return c.key
+	}
+	return c.hash()
+}
+
+func (c Clip) hash() string {
 	h := sha1.Sum([]byte(strings.Join([]string{c.Title, c.Author, string(c.Kind),
 		strconv.Itoa(c.LocStart), strconv.Itoa(c.LocEnd), c.Added.UTC().Format(time.RFC3339), c.Text}, "\x1f")))
 	return hex.EncodeToString(h[:10])
@@ -139,6 +148,7 @@ func parseBlock(lines []string) (Clip, bool) {
 	if c.Title == "" {
 		return Clip{}, false
 	}
+	c.key = c.hash()
 	return c, true
 }
 

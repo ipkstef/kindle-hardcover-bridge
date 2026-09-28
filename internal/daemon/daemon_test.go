@@ -30,8 +30,9 @@ func (f *fakeSrc) BookByKey(_ context.Context, k string) (*book.Local, error) {
 }
 
 type fakeSync struct {
-	calls []string
-	fail  bool
+	calls    []string
+	fail     bool
+	finished bool
 }
 
 func (f *fakeSync) Sync(_ context.Context, l *book.Local) (syncer.Outcome, error) {
@@ -39,7 +40,7 @@ func (f *fakeSync) Sync(_ context.Context, l *book.Local) (syncer.Outcome, error
 	if f.fail {
 		return syncer.Outcome{}, errors.New("network down")
 	}
-	return syncer.Outcome{Kind: syncer.Sent, Page: 1, Pages: 10}, nil
+	return syncer.Outcome{Kind: syncer.Sent, Page: 1, Pages: 10, Finished: f.finished}, nil
 }
 
 func newD(t *testing.T, src *fakeSrc, s *fakeSync) *Daemon {
@@ -118,5 +119,33 @@ func TestStatePersists(t *testing.T) {
 	d2.Scan(context.Background())
 	if len(s.calls) != 1 {
 		t.Fatalf("calls %v", s.calls)
+	}
+}
+
+// Device log 2026-09-28: finished at 100 %, user paged back to 98.22 % with
+// read state still 2 → must not finish a second time.
+func TestFinishOnlyOnce(t *testing.T) {
+	src := &fakeSrc{m: map[string]readers.Progress{"a": pr(50, 100)}}
+	s := &fakeSync{}
+	d := newD(t, src, s)
+	d.Scan(context.Background()) // baseline, syncs a
+	s.calls, s.finished = nil, true
+	src.m["a"] = readers.Progress{Percent: 100, LastAccess: 200, ReadState: 2}
+	d.Scan(context.Background())
+	if len(s.calls) != 1 {
+		t.Fatalf("finish calls %v", s.calls)
+	}
+	s.calls = nil
+	src.m["a"] = readers.Progress{Percent: 98.22, LastAccess: 300, ReadState: 2}
+	d.Scan(context.Background())
+	if len(s.calls) != 0 {
+		t.Fatalf("finished again: %v", s.calls)
+	}
+	// Restart: back to the start → normal syncing again.
+	s.finished = false
+	src.m["a"] = readers.Progress{Percent: 1.2, LastAccess: 400}
+	d.Scan(context.Background())
+	if len(s.calls) != 1 {
+		t.Fatalf("after restart: %v", s.calls)
 	}
 }

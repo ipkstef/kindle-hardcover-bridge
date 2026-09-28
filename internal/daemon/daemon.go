@@ -33,10 +33,14 @@ type Syncer interface {
 
 // State is saved to disk between runs.
 type State struct {
-	Snapshot   map[string]readers.Progress `json:"snapshot"`
-	Pending    map[string]int              `json:"pending"` // key → failed attempts
-	LastScan   time.Time                   `json:"last_scan"`
-	LastResult string                      `json:"last_result"`
+	Snapshot map[string]readers.Progress `json:"snapshot"`
+	Pending  map[string]int              `json:"pending"` // key → failed attempts
+	// Finished: books this daemon marked Read (key → date). They are not
+	// finished again (one-time action). Cleared when the book goes back
+	// under RestartPercent (a restart; re-read handling is not built yet).
+	Finished   map[string]string `json:"finished,omitempty"`
+	LastScan   time.Time         `json:"last_scan"`
+	LastResult string            `json:"last_result"`
 }
 
 // Daemon runs scans.
@@ -99,6 +103,9 @@ func (d *Daemon) Scan(ctx context.Context) error {
 	if st.Pending == nil {
 		st.Pending = map[string]int{}
 	}
+	if st.Finished == nil {
+		st.Finished = map[string]string{}
+	}
 	maxAttempts := d.MaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 5
@@ -151,6 +158,16 @@ func (d *Daemon) Scan(ctx context.Context) error {
 			break
 		}
 		p := cur[k]
+		if day, done := st.Finished[k]; done {
+			if p.Percent > 0 && p.Percent < RestartPercent && p.ReadState != 2 {
+				delete(st.Finished, k) // restarted
+			} else {
+				d.Logf("daemon: book %s: already finished on %s, not sent again", short(k), day)
+				st.Snapshot[k] = p
+				delete(st.Pending, k)
+				continue
+			}
+		}
 		local, err := d.Src.BookByKey(ctx, k)
 		if err != nil {
 			d.Logf("daemon: book %s: %v", short(k), err)
@@ -174,6 +191,9 @@ func (d *Daemon) Scan(ctx context.Context) error {
 		}
 		delete(st.Pending, k)
 		st.Snapshot[k] = p
+		if out.Finished && (out.Kind == syncer.Sent || out.Kind == syncer.Unchanged) {
+			st.Finished[k] = time.Now().Format("2006-01-02")
+		}
 		st.LastResult = describe(out)
 		d.Logf("daemon: %q: %s", local.Title, st.LastResult)
 	}
@@ -184,6 +204,10 @@ func (d *Daemon) Scan(ctx context.Context) error {
 	}
 	return err
 }
+
+// RestartPercent: a finished book that goes back under this percent was
+// restarted.
+const RestartPercent = 5.0
 
 // Status returns a copy of the state (after at least one scan or load).
 func (d *Daemon) Status() State {
@@ -197,6 +221,10 @@ func (d *Daemon) Status() State {
 
 func describe(o syncer.Outcome) string {
 	s := ""
+	switch {
+	case o.Finished && o.Kind == syncer.Unchanged:
+		return "already Read on Hardcover"
+	}
 	switch o.Kind {
 	case syncer.Sent:
 		s = "synced page " + itoa(o.Page) + "/" + itoa(o.Pages)

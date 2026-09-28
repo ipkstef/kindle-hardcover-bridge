@@ -74,7 +74,18 @@ func (c *ClipSync) Run(ctx context.Context, all bool) (sent int, err error) {
 	type key struct{ title, author string }
 	groups := map[key][]clippings.Clip{}
 	var order []key
+	pairs := pairNotes(clips)
 	for _, cl := range clips {
+		if h, ok := pairs.highlightOf[cl.ID()]; ok && cl.Kind == clippings.Note {
+			// The note carries its highlight; mark the highlight as merged.
+			cl.Text = noteWithHighlight(h.Text, cl.Text)
+		}
+		if _, merged := pairs.merged[cl.ID()]; merged {
+			if _, done := st.Sent[cl.ID()]; !done {
+				st.Sent[cl.ID()] = -2 // sent inside its note
+			}
+			continue
+		}
 		if cl.Kind != clippings.Highlight && cl.Kind != clippings.Note {
 			continue
 		}
@@ -221,4 +232,54 @@ func (c *ClipSync) save(st *ClipState) error {
 		return err
 	}
 	return os.Rename(tmp, c.StatePath)
+}
+
+// Note/highlight pairing. On the Kindle, a note on a highlight is saved as
+// two clippings: the note (at the highlight's last location) and the
+// highlight, with the same time (seen on FW 5.17.1: "Note Location 648" and
+// "Highlight Location 648-648", same "Added on").
+type notePairs struct {
+	highlightOf map[string]clippings.Clip // note ID → its highlight
+	merged      map[string]struct{}       // highlight IDs sent inside a note
+}
+
+// pairWindow: a note and its highlight are saved within this time.
+const pairWindow = 2 * time.Minute
+
+func pairNotes(clips []clippings.Clip) notePairs {
+	p := notePairs{highlightOf: map[string]clippings.Clip{}, merged: map[string]struct{}{}}
+	for _, n := range clips {
+		if n.Kind != clippings.Note || n.LocStart == 0 {
+			continue
+		}
+		best, found := clippings.Clip{}, false
+		for _, h := range clips {
+			if h.Kind != clippings.Highlight || h.Title != n.Title || h.Author != n.Author {
+				continue
+			}
+			if n.LocStart < h.LocStart || n.LocStart > h.LocEnd {
+				continue
+			}
+			if !n.Added.IsZero() && !h.Added.IsZero() {
+				d := n.Added.Sub(h.Added)
+				if d < -pairWindow || d > pairWindow {
+					continue
+				}
+			}
+			if _, used := p.merged[h.ID()]; used {
+				continue
+			}
+			best, found = h, true
+		}
+		if found {
+			p.highlightOf[n.ID()] = best
+			p.merged[best.ID()] = struct{}{}
+		}
+	}
+	return p
+}
+
+// noteWithHighlight is the journal text for a note on a highlight.
+func noteWithHighlight(highlight, note string) string {
+	return "Highlight:\n“" + strings.TrimSpace(highlight) + "”\n\nNote:\n" + strings.TrimSpace(note)
 }

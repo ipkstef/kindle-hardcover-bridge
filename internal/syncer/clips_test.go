@@ -69,19 +69,29 @@ func TestClipSync(t *testing.T) {
 	if n, _ := cs.Run(context.Background(), false); n != 0 || len(f.ops) != 0 {
 		t.Fatalf("repeat: %d %v", n, f.ops)
 	}
-	// Import all: the 3 baseline clips (2 quotes + 1 note) are sent once.
+	// Import all: 3 baseline clips = 1 quote + 1 note that carries its
+	// highlight (same location 648, same time) → 2 journal entries.
 	n, err = cs.Run(context.Background(), true)
-	if err != nil || n != 3 {
+	if err != nil || n != 2 {
 		t.Fatalf("import: %d %v", n, err)
 	}
-	notes := 0
+	var note map[string]any
+	quotes := 0
 	for i, op := range f.ops {
-		if op == "insert_reading_journal" && f.vars[i]["object"].(map[string]any)["event"] == "note" {
-			notes++
+		if op != "insert_reading_journal" {
+			continue
+		}
+		o := f.vars[i]["object"].(map[string]any)
+		switch o["event"] {
+		case "note":
+			note = o
+		case "quote":
+			quotes++
 		}
 	}
-	if notes != 1 {
-		t.Errorf("notes %d", notes)
+	want := "Highlight:\n“He does not speak to us. He speaks to another Gold,”\n\nNote:\nThis is a test of a note"
+	if note == nil || note["entry"] != want || quotes != 1 {
+		t.Errorf("note %v, quotes %d", note, quotes)
 	}
 	if n, _ := cs.Run(context.Background(), true); n != 0 {
 		t.Fatalf("second import sent %d", n)

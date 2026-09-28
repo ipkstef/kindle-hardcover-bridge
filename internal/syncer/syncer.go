@@ -297,6 +297,20 @@ func (s *Syncer) finish(ctx context.Context, local *book.Local, res *match.Resul
 	if fresh, err := s.C.UserBookByID(ctx, ub.ID); err == nil {
 		ub = fresh
 	}
+	// Already finished today (e.g. Hardcover moved the status back, or a
+	// retry): only set the status, never add a second finished read.
+	for _, r := range ub.Reads {
+		if r.FinishedAt != nil && *r.FinishedAt == today {
+			if ub.StatusID != hardcover.StatusRead {
+				if _, err := s.C.SetStatus(ctx, ub.ID, hardcover.StatusRead); err != nil {
+					return Outcome{}, err
+				}
+				s.logf("sync: read %d already finished today; status set to Read", r.ID)
+				return out, nil
+			}
+			return Outcome{Kind: Unchanged, Title: res.Title, Finished: true}, nil
+		}
+	}
 	pages, editionID := ub.Pages()
 	if pages <= 0 && res.Pages > 0 {
 		pages, editionID = res.Pages, res.EditionID
