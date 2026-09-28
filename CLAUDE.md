@@ -65,8 +65,8 @@ User goals and plan: `docs/roadmap.md` (event triggers, auto-add books,
 restart/finish, install without KUAL). Events test done: appmgrd
 `appPaused` reader + inotify on cc.db + Wi-Fi events all work (roadmap §1).
 Book matching is now a waterfall over all fields (ASIN → ISBN → library →
-search → skip), roadmap §2. `hcbridge identify` + probe ids v0.3 built; waiting
-for the user's device results. Then: auto-add, daemon.
+search → skip), roadmap §2; **works on device** (ISBN and library steps).
+Auto-add built in `hcbridge sync`; waiting for a device test. Then: daemon.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.

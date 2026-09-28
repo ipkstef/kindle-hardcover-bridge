@@ -85,18 +85,37 @@ func ISBN13To10(s string) string {
 }
 
 // FindISBNs returns valid ISBN-13s found in s (ISBN-10s are converted).
-func FindISBNs(s string) []string {
+// Use it for fields that are meant to hold an ISBN.
+func FindISBNs(s string) []string { return findISBNs(s, false) }
+
+// FindISBNsStrict is for free-text fields (description, rights, file name).
+// A random 10-digit number passes the ISBN-10 checksum 1 time in 11, so here
+// an ISBN-10 counts only right after the word "ISBN". ISBN-13 needs the
+// 978/979 prefix and its checksum, so it is accepted anywhere.
+func FindISBNsStrict(s string) []string { return findISBNs(s, true) }
+
+func findISBNs(s string, strict bool) []string {
 	var out []string
-	for _, m := range isbnRe.FindAllString(s, -1) {
-		d := strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(m))
+	lower := strings.ToLower(s)
+	for _, loc := range isbnRe.FindAllStringIndex(s, -1) {
+		d := strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(s[loc[0]:loc[1]]))
 		switch {
 		case ValidISBN13(d):
 			out = appendUniq(out, d)
-		case ValidISBN10(d):
+		case ValidISBN10(d) && (!strict || isbnLabelBefore(lower, loc[0])):
 			out = appendUniq(out, ISBN10To13(d))
 		}
 	}
 	return out
+}
+
+// isbnLabelBefore reports if "isbn" appears in the 12 chars before i.
+func isbnLabelBefore(lower string, i int) bool {
+	start := i - 12
+	if start < 0 {
+		start = 0
+	}
+	return strings.Contains(lower[start:i], "isbn")
 }
 
 // FindASINs returns Kindle-style ASINs (B0 + 8) found in s.

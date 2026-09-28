@@ -36,10 +36,10 @@ func TestBuildIdentityOrder(t *testing.T) {
 		mobi.ExthASIN:        {"f1638687-3e46-45b5-b4b2-8f37103c1743"}, // tool UUID, not an ASIN
 		mobi.ExthISBN:        {"978-0-306-40615-7"},
 		mobi.ExthDescription: {"Also by the author: ISBN 0-8044-2957-X"},
+		mobi.ExthPubDate:     {"2023-05-23 03:00:00"}, // must not give an ISBN
 		mobi.ExthSource:      {"calibre:f1638687, amzn B0CW1Q9K2F"},
 		mobi.ExthTitle:       {"A Parade of Horribles"},
 		mobi.ExthAuthor:      {"Matt Dinniman"},
-		mobi.ExthPubDate:     {"2024-02-06"},
 	}}
 	l := Local{Key: "f1638687-3e46-45b5-b4b2-8f37103c1743", Title: "A Parade of Horribles",
 		Authors: []string{"Matt Dinniman"}, Path: "/mnt/us/documents/x.azw3"}
@@ -58,7 +58,21 @@ func TestBuildIdentityOrder(t *testing.T) {
 			t.Errorf("id[%d] = %+v, want %+v", i, id.IDs[i], want[i])
 		}
 	}
-	if len(id.Titles) != 2 || id.Year != 2024 || id.Authors[0] != "Matt Dinniman" {
+	if len(id.Titles) != 2 || id.Year != 2023 || id.Authors[0] != "Matt Dinniman" {
 		t.Errorf("identity %+v", id)
+	}
+}
+
+func TestStrictISBN(t *testing.T) {
+	// Date text from EXTH 106 on the user's Kindle; "2023052303" passes the
+	// ISBN-10 checksum by chance.
+	if got := FindISBNsStrict("2023-05-23 03:00:00"); len(got) != 0 {
+		t.Errorf("date taken as ISBN: %v", got)
+	}
+	if got := FindISBNsStrict("print ISBN 0-8044-2957-X"); len(got) != 1 {
+		t.Errorf("labelled ISBN-10 missed: %v", got)
+	}
+	if got := FindISBNsStrict("see 978-0-306-40615-7"); len(got) != 1 {
+		t.Errorf("ISBN-13 missed: %v", got)
 	}
 }

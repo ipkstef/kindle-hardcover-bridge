@@ -32,6 +32,7 @@ type Catalog interface {
 type Result struct {
 	BookID    int
 	EditionID *int // set for ID hits
+	Pages     int  // pages of EditionID, if known
 	Title     string
 	Method    string // asin, isbn13, isbn10, library, search, search+year
 	Via       string // the identifier or title used
@@ -91,7 +92,7 @@ func Resolve(ctx context.Context, cat Catalog, id book.Identity, library []hardc
 				if q.field == "isbn_10" {
 					method = "isbn10"
 				}
-				return &Result{BookID: h.BookID, EditionID: &eid, Title: h.Book.Title, Method: method, Via: q.value}, steps, nil
+				return &Result{BookID: h.BookID, EditionID: &eid, Pages: h.Pages, Title: h.Book.Title, Method: method, Via: q.value}, steps, nil
 			}
 		}
 	}

@@ -131,3 +131,24 @@ Percent did not change in this test (10.6016 throughout).
 ## Book ID scan v0.1 (probe item 6) — invalid
 Reported 0 ISBN / 0 ASIN for all 98 MOBI/AZW3 files. Cause: parser bug (EXTH
 flag read at a wrong offset). Fixed in v0.2; to re-run.
+
+## Book ID scan v0.3 + identify (2026-09-28, 03:24–03:27 UTC)
+Scan (98 MOBI/AZW3 + 12 KFX, no titles in report):
+- EXTH present in all 98 MOBI/AZW3. Text types seen (type:books):
+  100:98 101:94 103:79 104:75 105:60 106:98 108:98 109:38 112:98 113:98
+  129:95 501:98 503:98 504:1 524:98 525:16 527:2 528:98 535:45.
+- **ISBN in EXTH 104: 75 books.** No `B0` ASIN anywhere (113 holds a tool UUID,
+  504 on one book, not an ASIN).
+- 23 MOBI/AZW3 books have no ISBN → library/search steps.
+- 12 KFX files (PDOC, 8-hex keys): not parsed; only cc.db fields.
+- **False positives:** EXTH 106 (publish date, e.g. `2023-05-23…`) gave fake
+  ISBNs via the ISBN-10 checksum (8 books). Fixed: only free-text fields
+  (103, 105, 109, 112) and the file name are scanned besides the dedicated ones,
+  and there an ISBN-10 needs an "ISBN" label.
+
+Identify on device (live API):
+- "The Strength of the Few": no ISBN → **library** step → book 824777
+  (Currently Reading). Correct.
+- "Games Wizards Play": ISBN 9780544633711 (EXTH 104) → `editions.isbn_13` →
+  book 651967. Correct. **`editions.isbn_13` filter works.**
+- `editions.asin` still untested (no ASIN on this device).

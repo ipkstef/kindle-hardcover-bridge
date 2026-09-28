@@ -38,6 +38,9 @@ type Identity struct {
 	Notes     []string // parse problems, for the log
 }
 
+// freeTextTypes are EXTH records that may mention an ID in free text.
+var freeTextTypes = []uint32{mobi.ExthDescription, mobi.ExthSubject, mobi.ExthRights, mobi.ExthSource}
+
 var yearRe = regexp.MustCompile(`\b(1[5-9]\d\d|20\d\d)\b`)
 
 // BuildIdentity merges cc.db data with the book file's metadata.
@@ -82,12 +85,12 @@ func BuildIdentity(l Local, meta *mobi.Meta) Identity {
 				}
 			}
 		}
-		for _, t := range meta.Types() {
-			if t == mobi.ExthISBN || t == mobi.ExthASIN || t == mobi.ExthASIN2 {
-				continue
-			}
+		// Free-text fields only. Structured fields (dates, language, tool
+		// names, build numbers) gave false ISBNs on the user's Kindle, e.g.
+		// EXTH 106 "2023-05-23..." → 9782023052303.
+		for _, t := range freeTextTypes {
 			for _, v := range meta.EXTH[t] {
-				for _, i := range FindISBNs(v) {
+				for _, i := range FindISBNsStrict(v) {
 					add(KindISBN13, i, fmt.Sprintf("exth%d", t), false)
 				}
 				for _, a := range FindASINs(v) {
@@ -100,7 +103,7 @@ func BuildIdentity(l Local, meta *mobi.Meta) Identity {
 		add(KindISBN13, i, "cc.cdeKey", true)
 	}
 	base := filepath.Base(l.Path)
-	for _, i := range FindISBNs(base) {
+	for _, i := range FindISBNsStrict(base) {
 		add(KindISBN13, i, "filename", false)
 	}
 	for _, a := range FindASINs(base) {

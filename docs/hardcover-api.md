@@ -29,7 +29,10 @@ query CurrentlyReading {
 Source: `Billiam/hardcoverapp.koplugin`, `hardcover/lib/hardcover_api.lua`.
 Not checked against official docs (blocked in the dev sandbox), but
 `me`, `user_books` (status 2) and `update_user_book_read` **work on the live API**
-(2026-09-28). `insert_user_book_read` is still **UNVERIFIED**.
+(2026-09-28). `editions(where: {isbn_13: {_eq: …}})` works (2026-09-28).
+Still **UNVERIFIED**: `insert_user_book_read`, `insert_user_book`,
+`update_user_book(status_id)`, `user_books_by_pk`, `books_by_pk` default
+editions, `editions.asin`, `search`.
 Used in `internal/hardcover/client.go`.
 
 - Progress is set in **pages** (`progress_pages`). Page = percent × edition

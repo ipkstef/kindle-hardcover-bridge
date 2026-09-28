@@ -104,6 +104,8 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 type Me struct {
 	ID       int    `json:"id"`
 	Username string `json:"username"`
+	// PrivacyID is the account default privacy for new shelf entries.
+	PrivacyID *int `json:"account_privacy_setting_id"`
 }
 
 // Me returns the signed-in user.
@@ -111,7 +113,7 @@ func (c *Client) Me(ctx context.Context) (*Me, error) {
 	var r struct {
 		Me []Me `json:"me"`
 	}
-	if err := c.Do(ctx, `query { me { id username } }`, nil, &r); err != nil {
+	if err := c.Do(ctx, `query { me { id username account_privacy_setting_id } }`, nil, &r); err != nil {
 		return nil, err
 	}
 	if len(r.Me) == 0 {
@@ -387,4 +389,93 @@ func (c *Client) SearchBooks(ctx context.Context, query string, limit int) ([]Bo
 		}
 	}
 	return res, nil
+}
+
+// UserBookByID returns one shelf entry with its reads.
+func (c *Client) UserBookByID(ctx context.Context, id int) (*UserBook, error) {
+	var r struct {
+		UB *UserBook `json:"user_books_by_pk"`
+	}
+	q := `query ($id: Int!) { user_books_by_pk(id: $id) {` + userBookFields + `} }`
+	if err := c.Do(ctx, q, map[string]any{"id": id}, &r); err != nil {
+		return nil, err
+	}
+	if r.UB == nil {
+		return nil, fmt.Errorf("hardcover: user_book %d not found", id)
+	}
+	return r.UB, nil
+}
+
+type userBookResult struct {
+	Error *string   `json:"error"`
+	UB    *UserBook `json:"user_book"`
+}
+
+func (r userBookResult) check() (*UserBook, error) {
+	if r.Error != nil && *r.Error != "" {
+		return nil, fmt.Errorf("hardcover: %s", *r.Error)
+	}
+	if r.UB == nil {
+		return nil, errors.New("hardcover: no user_book in response")
+	}
+	return r.UB, nil
+}
+
+// InsertUserBook puts a book on the user's shelf with a status.
+func (c *Client) InsertUserBook(ctx context.Context, bookID, statusID int, editionID *int, privacyID int) (*UserBook, error) {
+	var r struct {
+		R userBookResult `json:"insert_user_book"`
+	}
+	obj := map[string]any{"book_id": bookID, "status_id": statusID, "privacy_setting_id": privacyID}
+	if editionID != nil {
+		obj["edition_id"] = *editionID
+	}
+	q := `mutation ($object: UserBookCreateInput!) {
+		insert_user_book(object: $object) { error user_book {` + userBookFields + `} }
+	}`
+	if err := c.Do(ctx, q, map[string]any{"object": obj}, &r); err != nil {
+		return nil, err
+	}
+	return r.R.check()
+}
+
+// SetStatus changes the shelf status of a user book.
+func (c *Client) SetStatus(ctx context.Context, userBookID, statusID int) (*UserBook, error) {
+	var r struct {
+		R userBookResult `json:"update_user_book"`
+	}
+	q := `mutation ($id: Int!, $status: Int!) {
+		update_user_book(id: $id, object: {status_id: $status}) { error user_book {` + userBookFields + `} }
+	}`
+	if err := c.Do(ctx, q, map[string]any{"id": userBookID, "status": statusID}, &r); err != nil {
+		return nil, err
+	}
+	return r.R.check()
+}
+
+// DefaultEdition returns the book's default ebook edition, else its default
+// physical edition, else nil.
+func (c *Client) DefaultEdition(ctx context.Context, bookID int) (*Edition, error) {
+	var r struct {
+		B *struct {
+			Ebook    *Edition `json:"default_ebook_edition"`
+			Physical *Edition `json:"default_physical_edition"`
+		} `json:"books_by_pk"`
+	}
+	q := `query ($id: Int!) { books_by_pk(id: $id) {
+		default_ebook_edition { id pages }
+		default_physical_edition { id pages }
+	} }`
+	if err := c.Do(ctx, q, map[string]any{"id": bookID}, &r); err != nil {
+		return nil, err
+	}
+	switch {
+	case r.B == nil:
+		return nil, nil
+	case r.B.Ebook != nil && r.B.Ebook.Pages > 0:
+		return r.B.Ebook, nil
+	case r.B.Physical != nil && r.B.Physical.Pages > 0:
+		return r.B.Physical, nil
+	}
+	return nil, nil
 }

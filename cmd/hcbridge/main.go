@@ -72,7 +72,7 @@ func main() {
 	case "login":
 		err = a.login(ctx)
 	case "identify":
-		_, _, err = a.identify(ctx, true)
+		_, _, _, err = a.identify(ctx, true)
 	case "sync":
 		err = a.sync(ctx)
 	case "whoami":
@@ -143,10 +143,10 @@ func (a *app) whoami(ctx context.Context) error {
 // identify finds the current book on Hardcover with the match waterfall.
 // It returns the local book and the user's library entry (nil if the book is
 // not on the user's shelves).
-func (a *app) identify(ctx context.Context, show bool) (*book.Local, *hardcover.UserBook, error) {
+func (a *app) identify(ctx context.Context, show bool) (*book.Local, *match.Result, *hardcover.UserBook, error) {
 	local, err := a.db.CurrentBook(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var meta *mobi.Meta
 	if !strings.Contains(local.MimeType, "kfx") {
@@ -164,11 +164,11 @@ func (a *app) identify(ctx context.Context, show bool) (*book.Local, *hardcover.
 	c := a.client()
 	me, err := c.Me(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	lib, err := c.Library(ctx, me.ID)
 	if errors.Is(err, hardcover.ErrUnauthorized) {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err != nil {
 		// Not fatal: IDs and search still work without the library step.
@@ -179,13 +179,13 @@ func (a *app) identify(ctx context.Context, show bool) (*book.Local, *hardcover.
 		log.Printf("identify: %s", st)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if res == nil {
 		if show {
 			a.screen.Show("Hardcover: book not found", trim(local.Title, 46), "Not sent. Details: hcbridge.log")
 		}
-		return local, nil, errNotFound
+		return local, nil, nil, errNotFound
 	}
 	var ub *hardcover.UserBook
 	for i := range lib {
@@ -202,7 +202,7 @@ func (a *app) identify(ctx context.Context, show bool) (*book.Local, *hardcover.
 	if show {
 		a.screen.Show("Hardcover: found", trim(res.Title, 46), "via "+res.Method, "Shelf: "+shelf)
 	}
-	return local, ub, nil
+	return local, res, ub, nil
 }
 
 var errNotFound = errors.New("book not found on Hardcover (see log)")
@@ -221,8 +221,12 @@ func statusName(id int) string {
 	return fmt.Sprintf("status %d", id)
 }
 
+// finishedPercent: at or above this, the book counts as finished.
+// Finishing (status Read) is not built yet, so such books are not sent.
+const finishedPercent = 99.0
+
 func (a *app) sync(ctx context.Context) error {
-	local, ub, err := a.identify(ctx, false)
+	local, res, ub, err := a.identify(ctx, false)
 	if errors.Is(err, errNotFound) {
 		a.screen.Show("Hardcover: book not found", trim(local.Title, 46), "Not sent. Details: hcbridge.log")
 		return nil
@@ -230,18 +234,67 @@ func (a *app) sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if ub == nil || ub.StatusID != hardcover.StatusReading {
-		// Auto-add comes after the matching is checked on the device.
-		shelf := "not on your shelves"
-		if ub != nil {
-			shelf = statusName(ub.StatusID)
-		}
-		log.Printf("sync: book is %s, not sent", shelf)
-		a.screen.Show("Hardcover: not sent", trim(local.Title, 46), "Shelf: "+shelf)
+	notSent := func(why string) error {
+		log.Printf("sync: not sent: %s", why)
+		a.screen.Show("Hardcover: not sent", trim(res.Title, 46), trim(why, 46))
 		return nil
 	}
+	if local.Percent <= 0 {
+		return notSent("book not started on the Kindle")
+	}
+	if local.Percent >= finishedPercent {
+		return notSent("finished book: not built yet")
+	}
+
 	c := a.client()
+	switch {
+	case ub == nil:
+		// Auto-add to Currently Reading. Prefer the edition the ID pointed
+		// to (same ebook), else the book's default ebook/physical edition.
+		editionID := res.EditionID
+		if editionID == nil || res.Pages <= 0 {
+			if de, err := c.DefaultEdition(ctx, res.BookID); err != nil {
+				log.Printf("sync: default edition: %v", err)
+			} else if de != nil {
+				editionID = &de.ID
+			}
+		}
+		me, err := c.Me(ctx)
+		if err != nil {
+			return err
+		}
+		privacy := 1 // public, as the Hardcover KOReader plugin does
+		if me.PrivacyID != nil {
+			privacy = *me.PrivacyID
+		}
+		nub, err := c.InsertUserBook(ctx, res.BookID, hardcover.StatusReading, editionID, privacy)
+		if err != nil {
+			return err
+		}
+		log.Printf("sync: auto-added book %d to Currently Reading (user_book %d)", res.BookID, nub.ID)
+		ub = nub
+	case ub.StatusID == hardcover.StatusWantToRead:
+		nub, err := c.SetStatus(ctx, ub.ID, hardcover.StatusReading)
+		if err != nil {
+			return err
+		}
+		log.Printf("sync: moved user_book %d from Want to Read to Currently Reading", ub.ID)
+		ub = nub
+	case ub.StatusID != hardcover.StatusReading:
+		return notSent("shelf is " + statusName(ub.StatusID) + " (re-read: not built yet)")
+	}
+	// Re-read the entry: Hardcover may create a read by itself on status
+	// change (UNVERIFIED), and we must not add a second one.
+	if fresh, err := c.UserBookByID(ctx, ub.ID); err != nil {
+		log.Printf("sync: re-read user_book %d: %v", ub.ID, err)
+	} else {
+		ub = fresh
+	}
+
 	pages, editionID := ub.Pages()
+	if pages <= 0 && res.Pages > 0 {
+		pages, editionID = res.Pages, res.EditionID
+	}
 	if pages <= 0 {
 		return fmt.Errorf("no page count for %q on Hardcover", ub.Book.Title)
 	}

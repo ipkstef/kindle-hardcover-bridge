@@ -19,7 +19,7 @@ See findings "Events test". Design:
 - `lipc-wait-event` is a Kindle tool, not curl/Python; exists on FW 5.x.
   Present on old firmware: **UNVERIFIED**. inotify needs only the kernel.
 
-## 2. Find the book on Hardcover (waterfall) — built, not yet run on device
+## 2. Find the book on Hardcover (waterfall) — works on device (ISBN + library steps)
 Code: `internal/book/identity.go` (collect IDs), `internal/match/resolve.go`
 (waterfall). Rule from the user: read **every** field; do not assume one tool
 (e.g. Calibre) wrote the file; go from most exact to least exact.
@@ -41,8 +41,13 @@ Waterfall (first confident hit wins):
    one hit with the same year.
 5. Else skip and log. Never guess.
 
-Then: book on "Currently Reading" → update progress. Other shelf / not on
-shelves → **auto-add** (next step, after `identify` is checked on device).
+Then (`hcbridge sync`, built, **UNVERIFIED** on device):
+- not on shelves → **auto-add** to Currently Reading (`insert_user_book`, the
+  ID's edition or the default ebook/physical edition, account privacy);
+- Want to Read → move to Currently Reading (`update_user_book`);
+- Currently Reading → progress (forward only);
+- Read / DNF → not sent (re-read rule, §3); percent ≥ 99 → not sent (§4);
+  percent 0 → not sent.
 KFX: no file metadata yet (cc.db fields only).
 
 ## 3. Restart a book
