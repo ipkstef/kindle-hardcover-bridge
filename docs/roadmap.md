@@ -141,3 +141,18 @@ file's year; (2) else the one with a clear lead in readers (≥ 20 readers and
 ≥ 10× the next: Hardcover duplicates); (3) else skip, show a box once per
 book ("…add the right book to a shelf on hardcover.app"), and do not look
 the book up again for 1 h (miss cache, also saves API calls).
+
+## User decisions 2026-09-28 (business rules review)
+- Progress on a **Paused / DNF** book: move it to Currently Reading (a).
+  Setting Paused / DNF stays on the Hardcover website (no Kindle trigger).
+- Rating an unfinished book not on the shelves: add as Currently Reading (b).
+- Highlights/notes do **not** add the book to the shelves (c).
+- Finish: only from Kindle values (cc.db percent / read state), once per
+  read (a re-read clears it) — confirmed.
+- Next build: SQLite state store (`/var/local/hcbridge/hcbridge.db`, WAL,
+  synchronous=NORMAL), skip API calls when the page is unchanged, offline
+  mode (no API tries until Wi-Fi is back), quiet log, onboarding (auto-start
+  after sign-in), first-run rules (below).
+- First run: baseline, only the latest book syncs; old highlights only via
+  "Import all"; the Kindle library is never bulk-pushed (optional import
+  later, with a preview).
