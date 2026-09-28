@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/events"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/screen"
 )
 
 const (
@@ -77,13 +78,11 @@ func (a *app) dialogProbe(ctx context.Context) error {
 	}
 
 	// 4. Live tests. Each: set the property, wait for a tap, record.
+	// Only the tested, self-closing alert. The sample custom dialog of
+	// probe #3 is modal, has no visible button and stayed on screen until a
+	// restart (2026-09-28): never open it again.
 	tests := []struct{ prop, value string }{
-		{"pillowAlert", `{"clientParams":{"alertId":"hcbridgeTest","show":true,` +
-			`"customStrings":[{"matchStr":"alertTitle","replaceStr":"Hardcover test"},` +
-			`{"matchStr":"alertText","replaceStr":"Saved to Hardcover (test). Tap OK."}]}}`},
-		{"customDialog", `{"name":"sample_custom_dialog","clientParams":{}}`},
-		{"customDialog", `{"name":"simple_alert","clientParams":{"alertId":"hcbridgeTest",` +
-			`"title":"Hardcover test","text":"Saved to Hardcover (test). Tap OK."}}`},
+		{"pillowAlert", screen.AlertParams("Hardcover test", "Test box. It closes in 8 s.", 8000)},
 	}
 	for i, t := range tests {
 		w("test %d: lipc-set-prop com.lab126.pillow %s %s", i+1, t.prop, t.value)
