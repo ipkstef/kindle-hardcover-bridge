@@ -45,6 +45,14 @@ type RateSync struct {
 // dialogs). Rating records are handled on their own.
 var researchSchemas = []string{"goodreads", "ereader_dialog", "eink_end_actions"}
 
+// quietSchemas are known and not useful in the log (seen on device).
+var quietSchemas = map[string]bool{
+	"goodreads_eink_availability":           true,
+	"goodreads_eink_error_count_with_label": true,
+	"eink_end_actions_class_instance":       true,
+	"eink_end_actions_general":              true,
+}
+
 // Run copies new taps into the state, then sends pending ones.
 func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
 	r.mu.Lock()
@@ -77,7 +85,9 @@ func (r *RateSync) Run(ctx context.Context) (sent int, err error) {
 			if x.Schema == "goodreads_book_ratings" {
 				continue
 			}
-			r.S.logf("research: %s %s", x.Schema, x.JSON)
+			if !quietSchemas[x.Schema] {
+				r.S.logf("research: %s %s", x.Schema, x.JSON)
+			}
 			if status, key, raw := metrics.ShelfChoice(x.JSON); status != metrics.ShelfNone && key != "" {
 				st.Shelves[key] = status
 				r.S.logf("shelf: book %s → %q (Hardcover status %d)", short8(key), raw, status)

@@ -52,6 +52,11 @@ func TestShelfChoice(t *testing.T) {
 		rec    string
 		status int
 	}{
+		// Records copied from the device (2026-09-28).
+		{`{"action_id":"PerformManualShelving","context":"end_actions","event_type":"ManualShelving","is_goodreads_user":1,"is_offline":0,"is_sensitive":1,"jit_was_shown":1,"kindle_asin":"k","shelf_status":"currently-reading","widget_invoked_by":"InvokedByBookFinish"}`, ShelfReading},
+		{`{"action_id":"PerformManualShelving","kindle_asin":"k","shelf_status":"to-read"}`, ShelfWantToRead},
+		{`{"action_id":"PerformManualShelving","kindle_asin":"k","shelf_status":"read"}`, ShelfRead},
+		{`{"action_id":"PerformManualShelving","kindle_asin":"k","shelf_status":"unshelved"}`, ShelfNone},
 		{`{"action_id":"write_shelf","book_asin":"k","shelf":"to-read"}`, ShelfWantToRead},
 		{`{"book_asin":"k","shelf":{"name":"currently-reading"}}`, ShelfReading},
 		{`{"book_asin":"k","new_shelf":"READ"}`, ShelfRead},

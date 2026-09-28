@@ -133,37 +133,46 @@ const (
 	ShelfRead       = 3
 )
 
-// ShelfChoice finds a Goodreads shelf choice in a record: a string value of a
-// key that names a shelf ("shelf", "shelf_name", "new_shelf", "name", ...).
-// Returns the Hardcover status and the book key (book_asin). The record
-// format is UNVERIFIED: this accepts the usual Goodreads shelf names only.
+// ShelfChoice reads a Goodreads shelf choice from the end-of-book dialog.
+// Seen on FW 5.17.1 (schema goodreads_autoshelvings):
+//
+//	{"action_id":"PerformManualShelving","context":"end_actions",
+//	 "event_type":"ManualShelving","kindle_asin":"<cc.db p_cdeKey>",
+//	 "shelf_status":"currently-reading", ...}
+//
+// shelf_status values seen: "to-read", "currently-reading" ("read" by
+// analogy, UNVERIFIED). Other shelves ("Not on Profile") are ignored.
+// Returns the Hardcover status and the book key.
 func ShelfChoice(recJSON string) (status int, bookKey, raw string) {
 	var m map[string]any
 	if json.Unmarshal([]byte(recJSON), &m) != nil {
 		return ShelfNone, "", ""
 	}
-	bookKey, _ = m["book_asin"].(string)
-	var walk func(v any, key string)
-	walk = func(v any, key string) {
-		switch t := v.(type) {
-		case map[string]any:
-			for k, x := range t {
-				walk(x, k)
-			}
-		case string:
-			if status != ShelfNone || !strings.Contains(strings.ToLower(key), "shelf") && key != "name" {
-				return
-			}
-			switch strings.ToLower(strings.NewReplacer("_", "-", " ", "-").Replace(t)) {
-			case "to-read", "want-to-read":
-				status, raw = ShelfWantToRead, t
-			case "currently-reading":
-				status, raw = ShelfReading, t
-			case "read":
-				status, raw = ShelfRead, t
-			}
+	for _, k := range []string{"kindle_asin", "book_asin"} {
+		if v, ok := m[k].(string); ok && v != "" {
+			bookKey = v
+			break
 		}
 	}
-	walk(m, "")
-	return status, bookKey, raw
+	for _, k := range []string{"shelf_status", "shelf", "shelf_name", "new_shelf"} {
+		v, ok := m[k].(string)
+		if !ok {
+			if o, isObj := m[k].(map[string]any); isObj {
+				v, ok = o["name"].(string)
+			}
+		}
+		if !ok {
+			continue
+		}
+		switch strings.ToLower(strings.NewReplacer("_", "-", " ", "-").Replace(v)) {
+		case "to-read", "want-to-read":
+			return ShelfWantToRead, bookKey, v
+		case "currently-reading":
+			return ShelfReading, bookKey, v
+		case "read":
+			return ShelfRead, bookKey, v
+		}
+		return ShelfNone, bookKey, v
+	}
+	return ShelfNone, bookKey, ""
 }

@@ -62,8 +62,8 @@ func TestShelfChoiceSent(t *testing.T) {
 	fm := filepath.Join(dir, "fmcache.db")
 	db, _ := sql.Open("sqlite", fm)
 	db.Exec(`CREATE TABLE records (id INTEGER PRIMARY KEY, schema_name TEXT, created_timestamp INTEGER, record TEXT)`)
-	// Format UNVERIFIED: a guess of the shelf record, to test the mapping.
-	db.Exec(`INSERT INTO records VALUES (1,'goodreads_shelf_actions',1000,'{"book_asin":"k","shelf":"to-read"}')`)
+	// Record format as seen on the device.
+	db.Exec(`INSERT INTO records VALUES (1,'goodreads_autoshelvings',1000,'{"action_id":"PerformManualShelving","context":"end_actions","kindle_asin":"k","shelf_status":"to-read"}')`)
 	db.Close()
 	f := newFake(2)
 	rs := &RateSync{S: &Syncer{C: f.client(t), Logf: t.Logf}, Books: fakeBooks{},
