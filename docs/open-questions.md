@@ -1,10 +1,13 @@
 # Open questions and risks
 
 ## Kindle side
-- [ ] Which file/DB holds current position? Is it `cc.db`? Table/columns?
+- [x] Which file/DB holds current position? → `cc.db` `Entries.p_percentFinished`
+      (percent only; `p_lastAccessedPosition` is NULL on 5.17.1). See
+      `docs/findings-bellatrix-5.17.1.md`.
 - [ ] When is it written: every page turn, on sleep, or on book close?
 - [ ] Is it the same across old and new firmware?
-- [ ] How to get ASIN / ISBN for sideloaded books (no ASIN)?
+- [ ] How to get ASIN / ISBN for sideloaded books (no ASIN)? All books on the
+      test device are sideloaded (Calibre UUID in `p_cdeKey`). Try EXTH header.
 - [ ] Oldest Kindle model/firmware we will support? (Define the floor.)
 - [ ] Daemon autostart method that survives reboot and firmware updates.
 - [ ] Battery/Wi-Fi: send only when Wi-Fi is already up? Queue offline updates?

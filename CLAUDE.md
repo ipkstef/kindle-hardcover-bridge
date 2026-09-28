@@ -50,9 +50,10 @@ docs/                context docs (read these)
 ```
 
 ## Where we left off
-Research phase. Built the device probe (`docs/probe.md`). Waiting for the user
-to run it and send `hcprobe-report.txt`. The report decides the Go version.
-Then:
+Research phase. Probe ran on the user's Kindle (kernel 4.9, FW 5.17.1): Go
+works, HTTPS works. `cc.db` has percent, not location; books are sideloaded (no
+ASIN). See `docs/findings-bellatrix-5.17.1.md`. Go version is still open (needs
+an old-kernel device). Next:
 - A) Read `kindle-reading-dashboard` + NickelHardcover source; list exact `cc.db`
   fields and Hardcover mutations needed.
 - B) Prototype: device-code login + one progress update to Hardcover.
@@ -64,6 +65,7 @@ Then:
 - `docs/open-questions.md` — unknowns and risks
 - `docs/references.md` — links and prior art
 - `docs/probe.md` — device probe: what it checks, how to run it
+- `docs/findings-bellatrix-5.17.1.md` — results from the user's Kindle
 
 ## Working rules for Claude
 - Mark anything not verified on a real device or in real docs as **UNVERIFIED**.

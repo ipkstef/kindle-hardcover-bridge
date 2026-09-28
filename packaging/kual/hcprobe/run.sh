@@ -20,7 +20,7 @@ mkdir -p "$TMP"
 	sec "firmware";  cat /etc/prettyversion.txt 2>&1; cat /etc/version.txt 2>&1
 	# First 6 chars of the device ID give the model code. The rest (serial) is not recorded.
 	sec "model";     cut -c1-6 /proc/usid 2>&1
-	sec "cpu";       cat /proc/cpuinfo 2>&1
+	sec "cpu";       grep -v -i "^serial" /proc/cpuinfo 2>&1
 	sec "memory";    grep -E 'MemTotal|MemFree' /proc/meminfo 2>&1
 	sec "tools";     for t in sqlite3 lipc-get-prop eips curl python python3 timeout; do printf '%s: %s\n' "$t" "$(command -v $t || echo missing)"; done
 	sec "wifi";      lipc-get-prop com.lab126.wifid cmState 2>&1
