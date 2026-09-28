@@ -42,6 +42,9 @@ type RateSync struct {
 	// OnReread is called when a shelf choice starts a re-read (daemon: clear
 	// its "finished" mark for the book).
 	OnReread func(key string)
+	// OnRated is called after a rating was saved on Hardcover (daemon: show
+	// a message, because the Kindle shows a Goodreads error for the tap).
+	OnRated func(title string, stars float64)
 	// SyncShelves sends the Goodreads shelf choice from the end-of-book
 	// dialog as a Hardcover status. Off in the first release (user decision
 	// 2026-09-28: default logic only); the code stays for a later release.
@@ -232,7 +235,10 @@ func (r *RateSync) sendRating(ctx context.Context, x metrics.Rating) error {
 	if _, err := r.S.C.SetRating(ctx, ub.ID, x.Stars); err != nil {
 		return err
 	}
-	r.S.logf("ratings: %q rated %.0f stars (user_book %d)", local.Title, x.Stars, ub.ID)
+	r.S.logf("ratings: %q rated %g stars (user_book %d)", local.Title, x.Stars, ub.ID)
+	if r.OnRated != nil {
+		r.OnRated(res.Title, x.Stars)
+	}
 	return nil
 }
 

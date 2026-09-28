@@ -356,3 +356,23 @@ system log (`/var/log/messages`) names each window:
   (hot journal: read during the Kindle's commit). Watcher now reacts to the
   journal delete (commit end), and reads retry 3× on busy/readonly.
 - Search step matched "An Unwelcome Quest" (library had no match).
+
+## Dialog probe #3 (version b3862ce, 2026-09-28 12:17)
+- Screen 1072×1448, 300 dpi (`eips -i`). ASRMode 0.
+- **pillowAlert works** with a configured alert id. Our id `hcbridgeTest`
+  failed (`pillow-bb-no-buttons`, JS TypeError): ids must exist in
+  `simple_alert_config.js`. Generic one: **`appAlert1`** = title
+  `{alertTitle}`, text `{alertText}`, one Close button. Params:
+  `{"clientParams":{"alertId":"appAlert1","show":true,"autoHide":<ms>,
+  "customStrings":[{"matchStr":"alertTitle","replaceStr":…},
+  {"matchStr":"alertText","replaceStr":…}]}}`. Hide: `"hide":true`.
+- Button replies: only alerts with `callbackProp` in the config call
+  `setLipcProperty(<replySrc>, <callbackProp>, <button id>)`; `appAlert1`
+  has none. A reply needs a LIPC service of our own (not possible from a
+  static Go binary without liblipc — UNVERIFIED).
+- `customDialog {"name":"sample_custom_dialog"}` opened Amazon's sample
+  (its visible part is a font test; the real dialog div is hidden). Names
+  map to `/usr/share/webkit-1.0/pillow/<name>.html` (native pillowd;
+  loading a file outside that folder is UNVERIFIED). `simple_alert` as a
+  customDialog name: nothing shown.
+- Taps inside pillow dialogs are logged (`button-press:target=<dialog>`).

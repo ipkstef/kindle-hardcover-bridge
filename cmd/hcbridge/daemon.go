@@ -18,6 +18,7 @@ import (
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/daemon"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/events"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/metrics"
+	"github.com/ipkstef/kindle-hardcover-bridge/internal/screen"
 )
 
 const (
@@ -30,6 +31,8 @@ const (
 	// works harder near it, so memory is given back sooner on small devices.
 	// Idle RSS was ~12 MB (x86-64, 2026-09-28).
 	memLimit = 24 << 20
+	// alertHideMs: our "rating saved" box closes itself after this time.
+	alertHideMs = 8000
 )
 
 func (a *app) pidPath() string   { return filepath.Join(a.stateDir, "daemon.pid") }
@@ -149,6 +152,16 @@ func (a *app) daemon(ctx context.Context) error {
 	clips := a.clipSync()
 	ratings := a.rateSync()
 	ratings.OnTap = func() { go logDialog(ctx) }
+	// The Kindle shows "Rating Error" for a Goodreads call it cannot make
+	// (sideloaded books, probe 2026-09-28). Tell the user the rating is safe
+	// (option C): the Kindle's own system alert, closes by itself.
+	ratings.OnRated = func(title string, stars float64) {
+		text := fmt.Sprintf("%s: %g of 5 stars saved to Hardcover. You can ignore a Goodreads rating error.",
+			title, stars)
+		if err := screen.Alert("Hardcover", text, alertHideMs); err != nil {
+			log.Printf("daemon: alert: %v", err)
+		}
+	}
 	runRatings := func(ctx context.Context) {
 		if n, err := ratings.Run(ctx); err != nil {
 			log.Printf("daemon: ratings: %v (retry at next check)", err)

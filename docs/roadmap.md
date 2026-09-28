@@ -121,6 +121,13 @@ Proposed rule (**to confirm with a test**):
   only logged.
 - **Telemetry to S3** (out of scope for now): design in
   `docs/decisions/telemetry.md`.
-- **Rating Error dialog (approved: B + C):** close the stock error dialog
+- **Rating Error dialog — C built 2026-09-28:** after a rating is saved,
+  the daemon shows the Kindle's system alert `appAlert1` ("…stars saved to
+  Hardcover. You can ignore a Goodreads rating error.", closes after 8 s).
+  B (close the error box) dropped: fake taps need ASR/eat-tap mode and
+  per-model coordinates. **Half-star picker:** needs our own pillow dialog
+  with buttons and a reply channel; both need system changes or an
+  UNVERIFIED path trick — not planned.
+- (old note) **Rating Error dialog (approved: B + C):** close the stock error dialog
   after a star tap (window manager, format UNVERIFIED), then show a short
   "Saved to Hardcover" message. Dialog state research is in the daemon log.
