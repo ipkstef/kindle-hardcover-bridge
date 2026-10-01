@@ -119,7 +119,7 @@ in the log, Paused/DNF → Currently Reading on progress, daemon auto-starts
 after sign-in. 3-day run OK (one process, no errors). Added: sleep sidecar
 fallback, Self-test menu, per-sleep/go-Home log line, log header,
 replay fixtures from real device data (`internal/*/testdata`), test
-checklist per build (`docs/testing.md`). Open: autostart at boot /
+checklist per build (`docs/testing.md`). e118f27 **works on device**, self-test all OK. Open: autostart at boot /
 no-KUAL install (appreg.db, see roadmap), public client ID decision,
 old-kernel device check.
 

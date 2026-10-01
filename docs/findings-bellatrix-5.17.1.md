@@ -452,4 +452,7 @@ system log (`/var/log/messages`) names each window:
   sidecar 14.40 % not newer)" — correct.
 - go-Home after reading: page 102 synced. Jump back to 12.35 %: not sent
   (forward only). New highlight sent as a private quote.
-- Self-test not run yet. Change lines now also name the trigger.
+- Self-test (22:51): all 15 checks OK on device (tools, inotify, 420 MB
+  free, state DB, cc.db 79 books, sidecar = cc.db 12.35 %, ratings file,
+  20 clippings, signed in, book match, alert box). Change lines now also
+  name the trigger.
