@@ -64,6 +64,11 @@ type Daemon struct {
 	saved   string    // fingerprint of the state last written
 	savedAt time.Time // when it was written
 
+	// lastChanged / lastBook: result of the last scan, for the log.
+	lastChanged int
+	lastBook    string
+	lastPct     float64
+
 	// rereads: keys queued by ClearFinished, applied at the next scan. A
 	// separate lock, so ClearFinished never waits for a running scan.
 	rmu     sync.Mutex
@@ -216,6 +221,10 @@ func (d *Daemon) scan(ctx context.Context) error {
 		}
 	}
 
+	d.lastChanged = len(changed)
+	if k := latest(cur); k != "" {
+		d.lastBook, d.lastPct = k, cur[k].Percent
+	}
 	keys := make([]string, 0, len(changed))
 	for k := range changed {
 		keys = append(keys, k)
@@ -291,6 +300,14 @@ func (d *Daemon) scan(ctx context.Context) error {
 	}
 	st.LastScan = time.Now()
 	return d.save()
+}
+
+// LastScan reports how many books the last scan found changed, and the
+// most recently read book (key, cc.db percent).
+func (d *Daemon) LastScan() (changed int, book string, pct float64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.lastChanged, short(d.lastBook), d.lastPct
 }
 
 // RestartPercent: a finished book that goes back under this percent was

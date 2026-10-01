@@ -188,7 +188,7 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 		var nerr netError
 		if errors.As(err, &nerr) {
 			c.mu.Lock()
-			c.offlineAt = time.Now()
+			c.offlineAt = time.Now().Round(0) // wall clock: counts sleep time too
 			c.mu.Unlock()
 		}
 		var r429 errRetry429

@@ -222,7 +222,7 @@ func (s *Syncer) miss(key string) {
 	if s.misses == nil {
 		s.misses = map[string]time.Time{}
 	}
-	s.misses[key] = time.Now()
+	s.misses[key] = time.Now().Round(0) // wall clock: counts sleep time too
 }
 
 // notFound calls OnNotFound once per book.

@@ -432,3 +432,14 @@ system log (`/var/log/messages`) names each window:
   the user). Repeated identify / clips lines while offline or not found →
   now logged once.
 - A tap first shown as "sent later" is now shown again with its result.
+
+## Version 30aae25, 3-day run (2026-09-29 00:18 → 2026-10-01 22:31)
+- Same daemon process (pid 8060) for 3 days of sleep/wake: no crash, no
+  errors, no "offline". Two progress updates (Parade of Horribles page 79,
+  then 84/688), both sent at once.
+- User: the sleep test did not update until going Home. The quiet log gave
+  no line for the sleep, so the cause is unknown (UNVERIFIED: did cc.db get
+  a new percent on that sleep?). Now each sleep / go-Home logs "no new
+  position in cc.db" when nothing changed.
+- The hourly summary never came: Go's monotonic clock stops while the
+  Kindle sleeps. Summary, miss cache and offline timer now use wall time.

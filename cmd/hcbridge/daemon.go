@@ -213,7 +213,10 @@ func (a *app) daemon(ctx context.Context) error {
 		}
 	}
 	go watchRatings(ctx, filepath.Dir(metrics.DefaultPath), collect)
-	counts, countsAt := map[string]int{}, time.Now()
+	// Wall clock (Round(0) drops the monotonic reading): the monotonic
+	// clock stops while the Kindle sleeps, so "one hour" never came in 3
+	// days of mostly-asleep use (device log 2026-10-01).
+	counts, countsAt := map[string]int{}, time.Now().Round(0)
 	scan := func(why string) {
 		sctx, scancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer scancel()
@@ -224,10 +227,17 @@ func (a *app) daemon(ctx context.Context) error {
 		}
 		if time.Since(countsAt) >= time.Hour {
 			logCounts(counts, countsAt)
-			counts, countsAt = map[string]int{}, time.Now()
+			counts, countsAt = map[string]int{}, time.Now().Round(0)
 		}
 		if err := d.Scan(sctx); err != nil && ctx.Err() == nil {
 			log.Printf("daemon: scan (%s): %v", why, err)
+		}
+		// User actions (few per day) always get one line, so a log shows
+		// whether the Kindle wrote a new position for them.
+		if strings.Contains(why, "sleep") || strings.Contains(why, "left book") {
+			if n, book, pct := d.LastScan(); n == 0 {
+				log.Printf("daemon: scan (%s): no new position in cc.db (latest book %s at %.2f%%)", why, book, pct)
+			}
 		}
 	}
 	scan("start")
