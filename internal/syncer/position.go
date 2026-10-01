@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/mobi"
@@ -72,4 +73,22 @@ func short(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// SidecarPercent reads the book's sidecar position as a percent, with the
+// time it was saved. ok is false when there is no usable sidecar (KFX
+// positions, no text length, no file).
+func SidecarPercent(local *book.Local) (pct float64, saved time.Time, ok bool) {
+	if strings.Contains(local.MimeType, "kfx") {
+		return 0, time.Time{}, false
+	}
+	meta, err := mobi.ReadFile(local.Path)
+	if err != nil || meta == nil || meta.TextLength <= 0 {
+		return 0, time.Time{}, false
+	}
+	p, err := sidecar.ForBook(local.Path)
+	if err != nil || p.LPRPos < 0 {
+		return 0, time.Time{}, false
+	}
+	return min(100, float64(p.LPRPos)/float64(meta.TextLength)*100), p.Saved, true
 }

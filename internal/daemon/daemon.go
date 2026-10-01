@@ -9,8 +9,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +56,10 @@ type Daemon struct {
 	MaxAttempts int // give up on one percent value after this many errors
 	// After runs at the end of each scan (e.g. highlight/note sync).
 	After func(ctx context.Context)
+	// SidecarPct reads the sidecar position of a book (percent, time saved).
+	// Used only at a sleep / go-Home when cc.db has no new value (device
+	// 2026-10-01: a sleep in a book did not update until go-Home).
+	SidecarPct func(ctx context.Context, key string) (pct float64, saved time.Time, ok bool)
 	// Offline reports that the network is known to be down. Then changed
 	// books are only marked pending: no book look-up, no log per event.
 	Offline func() bool
@@ -68,6 +74,7 @@ type Daemon struct {
 	lastChanged int
 	lastBook    string
 	lastPct     float64
+	lastSide    string // sidecar check result, for the log
 
 	// rereads: keys queued by ClearFinished, applied at the next scan. A
 	// separate lock, so ClearFinished never waits for a running scan.
@@ -124,15 +131,28 @@ func fingerprint(st *State) string {
 
 // Scan compares cc.db with the snapshot and syncs changed books, then runs
 // After. After runs without the daemon lock held.
-func (d *Daemon) Scan(ctx context.Context) error {
-	err := d.scan(ctx)
+func (d *Daemon) Scan(ctx context.Context) error { return d.ScanFor(ctx, "") }
+
+// Sidecar fallback limits: the sidecar percent is used only when it is
+// ahead of cc.db by more than sideMin and at most sideMax (one reading
+// session), and below the finish line. It never finishes a book.
+const (
+	sideMin = 0.1
+	sideMax = 15.0
+)
+
+// ScanFor is Scan for a trigger ("sleep", "left book", ...). For a sleep or
+// go-Home, when cc.db has no new value for the latest book, a newer sidecar
+// position is sent instead (forward only, never a finish).
+func (d *Daemon) ScanFor(ctx context.Context, why string) error {
+	err := d.scan(ctx, why)
 	if d.After != nil && ctx.Err() == nil {
 		d.After(ctx)
 	}
 	return err
 }
 
-func (d *Daemon) scan(ctx context.Context) error {
+func (d *Daemon) scan(ctx context.Context, why string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.state == nil {
@@ -221,6 +241,27 @@ func (d *Daemon) scan(ctx context.Context) error {
 		}
 	}
 
+	// Sidecar fallback (see ScanFor).
+	override := map[string]float64{}
+	d.lastSide = ""
+	if k := latest(cur); k != "" && st.Snapshot != nil && !changed[k] && d.SidecarPct != nil &&
+		(strings.Contains(why, "sleep") || strings.Contains(why, "left book")) {
+		p := cur[k]
+		sc, saved, ok := d.SidecarPct(ctx, k)
+		switch {
+		case !ok:
+			d.lastSide = "no sidecar"
+		case saved.Unix() <= p.LastAccess:
+			d.lastSide = fmt.Sprintf("sidecar %.2f%% not newer", sc)
+		case sc-p.Percent <= sideMin || sc-p.Percent > sideMax || sc >= syncer.FinishedPercent:
+			d.lastSide = fmt.Sprintf("sidecar %.2f%% not used", sc)
+		default:
+			d.lastSide = fmt.Sprintf("sidecar %.2f%% used", sc)
+			d.Logf("daemon: %s: cc.db has no new position (%.2f%%), sidecar is newer: %.2f%%", why, p.Percent, sc)
+			override[k] = sc
+			changed[k] = true
+		}
+	}
 	d.lastChanged = len(changed)
 	if k := latest(cur); k != "" {
 		d.lastBook, d.lastPct = k, cur[k].Percent
@@ -264,6 +305,9 @@ func (d *Daemon) scan(ctx context.Context) error {
 		if old, ok := st.Snapshot[k]; ok && old.ReadState == 2 && p.ReadState == 2 {
 			local.ReadState = 0
 		}
+		if pct, ok := override[k]; ok {
+			local.Percent, local.SidecarOnly, local.ReadState = pct, true, 0
+		}
 		d.Logf("daemon: %q changed to %.2f%%", local.Title, p.Percent)
 		out, err := d.Sync.Sync(ctx, local)
 		if err != nil && syncer.Waiting(err) {
@@ -304,10 +348,10 @@ func (d *Daemon) scan(ctx context.Context) error {
 
 // LastScan reports how many books the last scan found changed, and the
 // most recently read book (key, cc.db percent).
-func (d *Daemon) LastScan() (changed int, book string, pct float64) {
+func (d *Daemon) LastScan() (changed int, book string, pct float64, side string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.lastChanged, short(d.lastBook), d.lastPct
+	return d.lastChanged, short(d.lastBook), d.lastPct, d.lastSide
 }
 
 // RestartPercent: a finished book that goes back under this percent was

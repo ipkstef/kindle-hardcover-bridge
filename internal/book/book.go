@@ -27,6 +27,9 @@ type Local struct {
 	// ReadState is p_readState. Seen on device: NULL (not finished),
 	// 1 (at 97–99 %), 2 (at 100 %, "read"), 3 (rare). Meaning UNVERIFIED.
 	ReadState int
+	// SidecarOnly: Percent comes from the sidecar (cc.db had no new value
+	// at a sleep / go-Home). Such a percent never finishes a book.
+	SidecarOnly bool
 }
 
 // NormTitle makes a title comparable: lower case, no accents, no punctuation,

@@ -225,3 +225,15 @@ func TestPausedMovesToReading(t *testing.T) {
 		t.Fatalf("got %+v %v", out, err)
 	}
 }
+
+// A percent from the sidecar never finishes a book.
+func TestSidecarOnlyNeverFinishes(t *testing.T) {
+	f := newFake(2)
+	s := &Syncer{C: f.client(t), Logf: t.Logf}
+	l := redRising
+	l.Percent, l.SidecarOnly = 99.6, true
+	out, err := s.Sync(context.Background(), &l)
+	if err != nil || out.Finished {
+		t.Fatalf("got %+v %v", out, err)
+	}
+}

@@ -25,38 +25,43 @@
 					"action": "/bin/sh ./run.sh status"
 				},
 				{
-					"name": "Sync current book now",
+					"name": "Self-test",
 					"priority": 5,
+					"action": "/bin/sh ./run.sh selftest"
+				},
+				{
+					"name": "Sync current book now",
+					"priority": 6,
 					"action": "/bin/sh ./run.sh sync"
 				},
 				{
 					"name": "Identify current book",
-					"priority": 6,
+					"priority": 7,
 					"action": "/bin/sh ./run.sh identify"
 				},
 				{
 					"name": "Sync highlights & notes now",
 					"action": "/bin/sh ./run.sh clips",
-					"priority": 7
+					"priority": 8
 				},
 				{
 					"name": "Import all old highlights & notes",
 					"action": "/bin/sh ./run.sh clipsall",
-					"priority": 8
+					"priority": 9
 				},
 				{
 					"name": "Save log to USB",
-					"priority": 9,
+					"priority": 10,
 					"action": "/bin/sh ./run.sh savelog"
 				},
 				{
 					"name": "Who am I",
-					"priority": 10,
+					"priority": 11,
 					"action": "/bin/sh ./run.sh whoami"
 				},
 				{
 					"name": "Sign out",
-					"priority": 11,
+					"priority": 12,
 					"action": "/bin/sh ./run.sh logout"
 				}
 			]

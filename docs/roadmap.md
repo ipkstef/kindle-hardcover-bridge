@@ -156,3 +156,14 @@ the book up again for 1 h (miss cache, also saves API calls).
 - First run: baseline, only the latest book syncs; old highlights only via
   "Import all"; the Kindle library is never bulk-pushed (optional import
   later, with a preview).
+
+## Install without KUAL: appreg.db (to study)
+`/var/local/appreg.db` (SQLite) registers apps with appmgrd: handler
+(`handlerId`, `command`, `lipcId`, `extend-start`, `unloadPolicy`,
+`maxGoTime` …), associations and properties. Used by
+github.com/KindleModding/sh_integration and
+github.com/notmarek/KOReaderIntegration (KUAL-free launchers). Source:
+kindlemodding.org/kindle-hacking/appreg.html (not reachable from the build
+machine; summary from search, UNVERIFIED). Use for: a launcher icon / file
+handler for sign-in, status, self-test without KUAL. Autostart at boot is
+a separate question (not covered by appreg).

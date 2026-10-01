@@ -9,6 +9,7 @@
 //	hcbridge clips    send new highlights/notes (private journal entries)
 //	hcbridge clipsall send all highlights/notes, also old ones
 //	hcbridge savelog  copy the log to the USB drive
+//	hcbridge selftest check all parts, show OK / FAIL (no writes)
 //	hcbridge dialogprobe collect dialog files and test pillow boxes (research)
 //	hcbridge whoami   show the signed-in user
 //	hcbridge logout   delete the saved token
@@ -79,7 +80,7 @@ func main() {
 	scope := fs.String("scope", hardcover.DefaultScope, "OAuth scopes")
 	row := fs.Int("row", 3, "first screen row for messages")
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: hcbridge login|daemon|stop|status|sync|identify|clips|clipsall|savelog|dialogprobe|whoami|logout [flags]")
+		fmt.Fprintln(os.Stderr, "usage: hcbridge login|daemon|stop|status|sync|identify|clips|clipsall|savelog|selftest|dialogprobe|whoami|logout [flags]")
 		os.Exit(2)
 	}
 	cmd := os.Args[1]
@@ -115,6 +116,8 @@ func main() {
 		err = a.clipsNow(ctx, cmd == "clipsall")
 	case "savelog":
 		err = a.saveLog()
+	case "selftest":
+		err = a.selfTest(ctx)
 	case "dialogprobe":
 		err = a.dialogProbe(ctx)
 	case "whoami":
@@ -304,7 +307,22 @@ func (a *app) clipsNow(ctx context.Context, all bool) error {
 
 // saveLog copies the log (and the rotated part) to the USB drive.
 func (a *app) saveLog() error {
-	var buf []byte
+	// Header: the state at save time, so one file answers most questions.
+	hdr := fmt.Sprintf("== hcbridge %s, saved %s ==\n", version, time.Now().UTC().Format(time.RFC3339))
+	if pid := a.running(); pid != 0 {
+		hdr += fmt.Sprintf("daemon: running, pid %d\n", pid)
+	} else {
+		hdr += "daemon: NOT running\n"
+	}
+	if db := a.stateDB(); db != nil {
+		hdr += fmt.Sprintf("state db: %d books, %d matches, %d clips sent, %d waiting, %d ratings waiting\n",
+			db.Count(store.TProgress), db.Count(store.TBookMap), db.Count(store.TClips),
+			db.Count(store.TPending), db.Count(store.TRatings))
+	}
+	if b, err := os.ReadFile(selfTestOut); err == nil {
+		hdr += "last self-test:\n" + string(b)
+	}
+	buf := []byte(hdr + "== log ==\n")
 	for _, p := range []string{a.logPath + ".1", a.logPath} {
 		if b, err := os.ReadFile(p); err == nil {
 			buf = append(buf, b...)

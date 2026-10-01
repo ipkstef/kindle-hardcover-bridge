@@ -266,6 +266,9 @@ func (s *Syncer) Sync(ctx context.Context, local *book.Local) (Outcome, error) {
 	for _, n := range notes {
 		s.logf("position: %s", n)
 	}
+	if local.SidecarOnly {
+		src = SrcSidecar // the daemon put the sidecar percent in local.Percent
+	}
 	// Finish only from the Kindle's own values: a sidecar position divided by
 	// a text length of another format part can give 100 % by mistake
 	// (review 2026-09-28).

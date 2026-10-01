@@ -191,6 +191,13 @@ func (a *app) daemon(ctx context.Context) error {
 	ratings.OnReread = func(key string) { d.ClearFinished(key) }
 	d = &daemon.Daemon{Src: a.db, Sync: a.syncer(), StatePath: a.statePath(), DB: a.stateDB(), Logf: log.Printf,
 		Offline: a.client().Offline,
+		SidecarPct: func(ctx context.Context, key string) (float64, time.Time, bool) {
+			b, err := a.db.BookByKey(ctx, key)
+			if err != nil {
+				return 0, time.Time{}, false
+			}
+			return syncer.SidecarPercent(b)
+		},
 		After: func(ctx context.Context) {
 			runRatings(ctx)
 			if n, err := clips.Run(ctx, false); err != nil {
@@ -229,14 +236,14 @@ func (a *app) daemon(ctx context.Context) error {
 			logCounts(counts, countsAt)
 			counts, countsAt = map[string]int{}, time.Now().Round(0)
 		}
-		if err := d.Scan(sctx); err != nil && ctx.Err() == nil {
+		if err := d.ScanFor(sctx, why); err != nil && ctx.Err() == nil {
 			log.Printf("daemon: scan (%s): %v", why, err)
 		}
 		// User actions (few per day) always get one line, so a log shows
 		// whether the Kindle wrote a new position for them.
 		if strings.Contains(why, "sleep") || strings.Contains(why, "left book") {
-			if n, book, pct := d.LastScan(); n == 0 {
-				log.Printf("daemon: scan (%s): no new position in cc.db (latest book %s at %.2f%%)", why, book, pct)
+			if n, book, pct, side := d.LastScan(); n == 0 {
+				log.Printf("daemon: scan (%s): no new position in cc.db (latest book %s at %.2f%%; %s)", why, book, pct, side)
 			}
 		}
 	}

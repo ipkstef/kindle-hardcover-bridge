@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/book"
 	"github.com/ipkstef/kindle-hardcover-bridge/internal/hardcover"
@@ -34,16 +35,18 @@ func (f *fakeSrc) BookByKey(_ context.Context, k string) (*book.Local, error) {
 }
 
 type fakeSync struct {
-	calls      []string
-	readStates []int
-	fail       bool
-	offline    bool
-	finished   bool
+	calls       []string
+	readStates  []int
+	fail        bool
+	offline     bool
+	finished    bool
+	sidecarOnly bool
 }
 
 func (f *fakeSync) Sync(_ context.Context, l *book.Local) (syncer.Outcome, error) {
 	f.calls = append(f.calls, l.Key)
 	f.readStates = append(f.readStates, l.ReadState)
+	f.sidecarOnly = l.SidecarOnly
 	if f.fail {
 		return syncer.Outcome{}, errors.New("graphql: bad request")
 	}
@@ -290,5 +293,43 @@ func TestDBStateRestartAndImport(t *testing.T) {
 	}
 	if d2.state.Finished["b"] != "2026-09-01" {
 		t.Fatalf("finished lost: %v", d2.state.Finished)
+	}
+}
+
+// Sleep with no new cc.db value: a newer sidecar position a bit ahead is
+// sent, marked SidecarOnly; one that is not newer, too far ahead or at the
+// end is not used.
+func TestSleepSidecarFallback(t *testing.T) {
+	src := &fakeSrc{m: map[string]readers.Progress{"a": pr(10, 1000)}}
+	s := &fakeSync{}
+	d := newD(t, src, s)
+	d.Scan(context.Background()) // baseline (+ latest book synced)
+	s.calls = nil
+	var side float64
+	var saved time.Time
+	d.SidecarPct = func(context.Context, string) (float64, time.Time, bool) { return side, saved, true }
+	try := func(pct float64, at int64, why string) int {
+		side, saved = pct, time.Unix(at, 0)
+		n := len(s.calls)
+		d.ScanFor(context.Background(), why)
+		return len(s.calls) - n
+	}
+	if n := try(12, 999, "sleep"); n != 0 {
+		t.Fatal("sidecar not newer, but used")
+	}
+	if n := try(40, 2000, "sleep"); n != 0 {
+		t.Fatal("sidecar too far ahead, but used")
+	}
+	if n := try(99.5, 2000, "sleep"); n != 0 {
+		t.Fatal("sidecar at the end, but used")
+	}
+	if n := try(12, 2000, "db commit"); n != 0 {
+		t.Fatal("used without a sleep / go-Home")
+	}
+	if n := try(12, 2000, "sleep, network up"); n != 1 {
+		t.Fatal("newer sidecar not used at sleep")
+	}
+	if !s.sidecarOnly {
+		t.Fatal("not marked SidecarOnly")
 	}
 }

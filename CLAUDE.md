@@ -29,7 +29,9 @@ state from the **stock Amazon Kindle reader** and sends it to **Hardcover.app**.
    1. `cc.db` `p_percentFinished` (confirmed: written on go-Home and sleep);
    2. `cc.db` `p_lastAccessedPosition` ÷ text length (empty on FW 5.17.1);
    3. sidecar `.azw3f` `lpr` ÷ text length — **fallback only**, always logged
-      as a cross-check.
+      as a cross-check. Also used (user decision 2026-10-01) at a sleep /
+      go-Home when cc.db has no new value and the sidecar is newer and
+      0.1–15 points ahead; never finishes a book.
    Hardcover page = percent × edition pages. **APNX page maps are dropped**
    (Calibre APNX on the device is synthetic: fixed 2300 chars per page).
 4. **Capability model.** Backends are optional (`database`, `sidecar`, `lipc`,
@@ -114,8 +116,12 @@ First" authors, sleep-in-book sync, clips. Core is done. Built next
 docs/decisions/embedded-db.md), no API call when the page is unchanged,
 offline mode (no network tries until Wi-Fi is back), hourly event summary
 in the log, Paused/DNF → Currently Reading on progress, daemon auto-starts
-after sign-in. Open: autostart at boot / no-KUAL install, public client ID
-decision, old-kernel device check.
+after sign-in. 3-day run OK (one process, no errors). Added: sleep sidecar
+fallback, Self-test menu, per-sleep/go-Home log line, log header,
+replay fixtures from real device data (`internal/*/testdata`), test
+checklist per build (`docs/testing.md`). Open: autostart at boot /
+no-KUAL install (appreg.db, see roadmap), public client ID decision,
+old-kernel device check.
 
 Next after it works: the daemon (poll loop, send on change, Wi-Fi handling).
 Go version still open (needs an old-kernel device); builds use Go 1.23.
@@ -132,6 +138,7 @@ Go version still open (needs an old-kernel device); builds use Go 1.23.
 - `docs/roadmap.md` — user goals and plan to the end product
 - `docs/hardcover-features.md` — journals, ratings, finish, re-read, scopes, limits
 - `docs/decisions/embedded-db.md` — state DB choice (modernc sqlite, later)
+- `docs/testing.md` — how we test: fixtures, self-test, one checklist per build
 - `docs/decisions/telemetry.md` — opt-in telemetry to S3 (draft, user decisions open)
 
 ## Working rules for Claude
