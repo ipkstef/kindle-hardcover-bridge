@@ -103,9 +103,9 @@ Proposed rule (**to confirm with a test**):
   `com.notmarek.shell_integration.launcher` (seen in the events test). So this
   jailbreak runs **`.sh` scriptlets from the library**. Idea: one file `documents/Hardcover.sh`:
   tap it → install/start daemon, show sign-in code if needed.
-- Autostart after reboot: an upstart job in `/etc/upstart/` (needs rootfs
-  write; likely lost on firmware update → tap `Hardcover.sh` again).
-  **UNVERIFIED** on this device.
+- Autostart after reboot: **not done** (user decision 2026-10-01). KPM
+  rules forbid rootfs writes and Kindles rarely reboot. After a reboot the
+  user taps `Hardcover.sh` once. See `docs/kindlemodding-notes.md`.
 
 ## Later (user decision: core first)
 - **Local SQLite database** for daemon state (`/var/local/hcbridge/hcbridge.db`):
