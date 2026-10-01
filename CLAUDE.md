@@ -138,6 +138,7 @@ Go version still open (needs an old-kernel device); builds use Go 1.23.
 - `docs/roadmap.md` — user goals and plan to the end product
 - `docs/hardcover-features.md` — journals, ratings, finish, re-read, scopes, limits
 - `docs/decisions/embedded-db.md` — state DB choice (modernc sqlite, later)
+- `docs/kindlemodding-notes.md` — KindleModding wiki: scriptlets, KPM, boot, appreg
 - `docs/testing.md` — how we test: fixtures, self-test, one checklist per build
 - `docs/decisions/telemetry.md` — opt-in telemetry to S3 (draft, user decisions open)
 
