@@ -308,7 +308,7 @@ func (d *Daemon) scan(ctx context.Context, why string) error {
 		if pct, ok := override[k]; ok {
 			local.Percent, local.SidecarOnly, local.ReadState = pct, true, 0
 		}
-		d.Logf("daemon: %q changed to %.2f%%", local.Title, p.Percent)
+		d.Logf("daemon: %q changed to %.2f%% (%s)", local.Title, p.Percent, why)
 		out, err := d.Sync.Sync(ctx, local)
 		if err != nil && syncer.Waiting(err) {
 			// No network or no sign-in: keep it, without counting an attempt.

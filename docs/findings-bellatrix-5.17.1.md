@@ -443,3 +443,13 @@ system log (`/var/log/messages`) names each window:
   position in cc.db" when nothing changed.
 - The hourly summary never came: Go's monotonic clock stops while the
   Kindle sleeps. Summary, miss cache and offline timer now use wall time.
+
+## Version e118f27 on device (2026-10-01 22:45–22:49)
+- Log header works (daemon pid, DB: 79 books, 21 matches, 19 clips sent).
+- Sleep **with** page turns: cc.db had the new percent (13.73 → 14.41 %),
+  synced pages 94 → 99; no sidecar fallback needed this time.
+- Sleep **without** a page turn: "no new position in cc.db (… 14.41 %;
+  sidecar 14.40 % not newer)" — correct.
+- go-Home after reading: page 102 synced. Jump back to 12.35 %: not sent
+  (forward only). New highlight sent as a private quote.
+- Self-test not run yet. Change lines now also name the trigger.
